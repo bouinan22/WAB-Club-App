@@ -1,0 +1,702 @@
+{
+  "entities": {
+    "AdminMarker": {
+      "title": "AdminMarker",
+      "description": "Trusted administrator marker document keyed by Firebase Auth UID.",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "email": { "type": "string", "minLength": 3, "maxLength": 160 },
+        "role": { "type": "string", "enum": ["super_admin", "admin"] },
+        "fullName": { "type": "string", "minLength": 1, "maxLength": 120 },
+        "createdAt": { "type": "string", "maxLength": 40 }
+      },
+      "required": ["uid", "email", "role", "fullName", "serverCreatedAt", "serverUpdatedAt"]
+    },
+    "UserProfile": {
+      "title": "UserProfile",
+      "description": "Club user profile document stored under users/{uid} without password secrets.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "uid": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "username": { "type": "string", "minLength": 1, "maxLength": 64 },
+        "email": { "type": "string", "minLength": 3, "maxLength": 160 },
+        "fullName": { "type": "string", "minLength": 1, "maxLength": 120 },
+        "role": { "type": "string", "enum": ["admin", "coach", "parent"] },
+        "phone": { "type": "string", "maxLength": 32 },
+        "active": { "type": "boolean" },
+        "categoryIds": { "type": "array" },
+        "photoUrl": { "type": "string", "maxLength": 1000 },
+        "allowCoachPhotoEdit": { "type": "boolean" },
+        "scopedPlayerId": { "type": "string", "maxLength": 128 },
+        "createdAt": { "type": "string", "maxLength": 40 },
+        "lastLoginAt": { "type": "string", "maxLength": 40 }
+      },
+      "required": ["id", "uid", "username", "email", "fullName", "role", "active", "categoryIds", "serverCreatedAt", "serverUpdatedAt"]
+    },
+    "ClubSettingsPublic": {
+      "title": "ClubSettingsPublic",
+      "description": "Public club branding and active season configuration without private PII.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "minLength": 1, "maxLength": 64, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "clubName": { "type": "string", "minLength": 1, "maxLength": 120 },
+        "clubShortName": { "type": "string", "minLength": 1, "maxLength": 32 },
+        "clubEnglishName": { "type": "string", "minLength": 1, "maxLength": 120 },
+        "foundedYear": { "type": "string", "maxLength": 10 },
+        "logoUrl": { "type": "string", "maxLength": 1000 },
+        "primaryColor": { "type": "string", "maxLength": 20 },
+        "secondaryColor": { "type": "string", "maxLength": 20 },
+        "surfaceColor": { "type": "string", "maxLength": 20 },
+        "address": { "type": "string", "maxLength": 200 },
+        "season": { "type": "string", "maxLength": 40 },
+        "seasonStartDate": { "type": "string", "maxLength": 20 },
+        "seasonEndDate": { "type": "string", "maxLength": 20 },
+        "venues": { "type": "array" },
+        "currency": { "type": "string", "maxLength": 16 }
+      },
+      "required": ["id", "clubName", "clubShortName", "logoUrl", "primaryColor", "season", "serverCreatedAt", "serverUpdatedAt"]
+    },
+    "ClubSettingsPrivate": {
+      "title": "ClubSettingsPrivate",
+      "description": "Admin-only club contact and default financial configuration.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "minLength": 1, "maxLength": 64, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "phone": { "type": "string", "maxLength": 40 },
+        "email": { "type": "string", "maxLength": 160 },
+        "subscriptionStartDate": { "type": "string", "maxLength": 20 },
+        "subscriptionEndDate": { "type": "string", "maxLength": 20 },
+        "defaultAnnualFee": { "type": "number" },
+        "allowInstallments": { "type": "boolean" }
+      },
+      "required": ["id", "defaultAnnualFee", "allowInstallments", "serverCreatedAt", "serverUpdatedAt"]
+    },
+    "Category": {
+      "title": "Category",
+      "description": "Football academy age category.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "minLength": 1, "maxLength": 64, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "code": { "type": "string", "minLength": 1, "maxLength": 20 },
+        "name": { "type": "string", "minLength": 1, "maxLength": 120 },
+        "ageRange": { "type": "string", "maxLength": 64 },
+        "annualFee": { "type": "number" },
+        "monthlyFee": { "type": "number" },
+        "description": { "type": "string", "maxLength": 500 },
+        "authorizedCoachUids": { "type": "array" }
+      },
+      "required": ["id", "code", "name", "ageRange", "annualFee", "description", "serverCreatedAt", "serverUpdatedAt"]
+    },
+    "SeasonRecord": {
+      "title": "SeasonRecord",
+      "description": "Sporting season record.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "name": { "type": "string", "minLength": 1, "maxLength": 64 },
+        "startDate": { "type": "string", "maxLength": 20 },
+        "endDate": { "type": "string", "maxLength": 20 },
+        "subscriptionStartDate": { "type": "string", "maxLength": 20 },
+        "subscriptionEndDate": { "type": "string", "maxLength": 20 },
+        "defaultAnnualFee": { "type": "number" },
+        "allowInstallments": { "type": "boolean" },
+        "status": { "type": "string", "enum": ["active", "archived"] },
+        "createdAt": { "type": "string", "maxLength": 40 }
+      },
+      "required": ["id", "name", "startDate", "endDate", "status", "serverCreatedAt", "serverUpdatedAt"]
+    },
+    "Coach": {
+      "title": "Coach",
+      "description": "Coach profile assigned to categories.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "userId": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "authUid": { "type": "string", "maxLength": 128 },
+        "fullName": { "type": "string", "minLength": 1, "maxLength": 120 },
+        "phone": { "type": "string", "maxLength": 32 },
+        "email": { "type": "string", "maxLength": 160 },
+        "specialty": { "type": "string", "maxLength": 160 },
+        "categoryIds": { "type": "array" },
+        "trainingProgram": { "type": "string", "maxLength": 1000 },
+        "active": { "type": "boolean" },
+        "joinedAt": { "type": "string", "maxLength": 40 },
+        "photoUrl": { "type": "string", "maxLength": 1000 },
+        "allowCoachPhotoEdit": { "type": "boolean" }
+      },
+      "required": ["id", "userId", "fullName", "email", "categoryIds", "active", "joinedAt", "serverCreatedAt", "serverUpdatedAt"]
+    },
+    "Player": {
+      "title": "Player",
+      "description": "Academy player profile scoped by parentAuthUid and authorizedCoachUids.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "fullName": { "type": "string", "minLength": 1, "maxLength": 120 },
+        "photoUrl": { "type": "string", "maxLength": 1000 },
+        "birthDate": { "type": "string", "minLength": 4, "maxLength": 20 },
+        "categoryId": { "type": "string", "minLength": 1, "maxLength": 64 },
+        "parentName": { "type": "string", "maxLength": 120 },
+        "parentPhone": { "type": "string", "maxLength": 32 },
+        "parentUserId": { "type": "string", "maxLength": 128 },
+        "parentAuthUid": { "type": "string", "maxLength": 128 },
+        "authorizedCoachUids": { "type": "array" },
+        "coachNames": { "type": "array" },
+        "address": { "type": "string", "maxLength": 240 },
+        "registrationDate": { "type": "string", "maxLength": 40 },
+        "status": { "type": "string", "enum": ["active", "inactive", "archived"] },
+        "jerseyNumber": { "type": "number" },
+        "position": { "type": "string", "maxLength": 80 },
+        "adminNotes": { "type": "string", "maxLength": 1000 },
+        "medicalNotes": { "type": "string", "maxLength": 1000 }
+      },
+      "required": ["id", "fullName", "birthDate", "categoryId", "parentName", "parentPhone", "parentUserId", "registrationDate", "status", "authorizedCoachUids", "serverCreatedAt", "serverUpdatedAt"]
+    },
+    "TrainingSession": {
+      "title": "TrainingSession",
+      "description": "Scheduled training session for a category.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "title": { "type": "string", "minLength": 1, "maxLength": 160 },
+        "categoryId": { "type": "string", "minLength": 1, "maxLength": 64 },
+        "coachId": { "type": "string", "maxLength": 128 },
+        "coachName": { "type": "string", "maxLength": 120 },
+        "authorizedCoachUids": { "type": "array" },
+        "date": { "type": "string", "maxLength": 20 },
+        "startTime": { "type": "string", "maxLength": 16 },
+        "endTime": { "type": "string", "maxLength": 16 },
+        "venue": { "type": "string", "maxLength": 160 },
+        "objectives": { "type": "string", "maxLength": 1000 },
+        "notes": { "type": "string", "maxLength": 1000 },
+        "status": { "type": "string", "enum": ["scheduled", "completed", "cancelled"] },
+        "createdAt": { "type": "string", "maxLength": 40 }
+      },
+      "required": ["id", "title", "categoryId", "date", "status", "authorizedCoachUids", "serverCreatedAt", "serverUpdatedAt"]
+    },
+    "AttendanceRecord": {
+      "title": "AttendanceRecord",
+      "description": "Player attendance entry for a session.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "playerId": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "playerName": { "type": "string", "minLength": 1, "maxLength": 120 },
+        "categoryId": { "type": "string", "minLength": 1, "maxLength": 64 },
+        "parentAuthUid": { "type": "string", "maxLength": 128 },
+        "authorizedCoachUids": { "type": "array" },
+        "sessionId": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "sessionTitle": { "type": "string", "maxLength": 160 },
+        "date": { "type": "string", "maxLength": 20 },
+        "status": { "type": "string", "enum": ["present", "absent", "excused"] },
+        "notes": { "type": "string", "maxLength": 500 },
+        "recordedBy": { "type": "string", "maxLength": 128 },
+        "recordedByName": { "type": "string", "maxLength": 120 },
+        "updatedAt": { "type": "string", "maxLength": 40 }
+      },
+      "required": ["id", "playerId", "playerName", "categoryId", "sessionId", "date", "status", "authorizedCoachUids", "serverCreatedAt", "serverUpdatedAt"]
+    },
+    "MatchRecord": {
+      "title": "MatchRecord",
+      "description": "Match schedule and score record.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "opponent": { "type": "string", "minLength": 1, "maxLength": 160 },
+        "categoryId": { "type": "string", "minLength": 1, "maxLength": 64 },
+        "authorizedCoachUids": { "type": "array" },
+        "date": { "type": "string", "maxLength": 20 },
+        "time": { "type": "string", "maxLength": 16 },
+        "venue": { "type": "string", "maxLength": 160 },
+        "locationType": { "type": "string", "enum": ["home", "away"] },
+        "status": { "type": "string", "enum": ["scheduled", "completed", "cancelled", "postponed"] },
+        "goalsFor": { "type": "number" },
+        "goalsAgainst": { "type": "number" },
+        "technicalNotes": { "type": "string", "maxLength": 1000 },
+        "createdAt": { "type": "string", "maxLength": 40 }
+      },
+      "required": ["id", "opponent", "categoryId", "date", "locationType", "status", "authorizedCoachUids", "serverCreatedAt", "serverUpdatedAt"]
+    },
+    "AnnualSubscription": {
+      "title": "AnnualSubscription",
+      "description": "Admin-only annual subscription fee status for a player.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "seasonId": { "type": "string", "maxLength": 128 },
+        "seasonName": { "type": "string", "maxLength": 64 },
+        "playerId": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "playerName": { "type": "string", "maxLength": 120 },
+        "categoryId": { "type": "string", "maxLength": 64 },
+        "totalFee": { "type": "number" },
+        "paidAmount": { "type": "number" },
+        "remainingAmount": { "type": "number" },
+        "status": { "type": "string", "enum": ["paid", "unpaid", "expired", "exempt", "partial"] },
+        "startDate": { "type": "string", "maxLength": 20 },
+        "endDate": { "type": "string", "maxLength": 20 },
+        "notes": { "type": "string", "maxLength": 500 },
+        "createdAt": { "type": "string", "maxLength": 40 },
+        "updatedAt": { "type": "string", "maxLength": 40 }
+      },
+      "required": ["id", "seasonId", "playerId", "totalFee", "paidAmount", "remainingAmount", "status", "serverCreatedAt", "serverUpdatedAt"]
+    },
+    "PaymentRecord": {
+      "title": "PaymentRecord",
+      "description": "Admin-only official payment receipt record.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "subscriptionId": { "type": "string", "maxLength": 128 },
+        "seasonId": { "type": "string", "maxLength": 128 },
+        "seasonName": { "type": "string", "maxLength": 64 },
+        "playerId": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "playerName": { "type": "string", "maxLength": 120 },
+        "categoryId": { "type": "string", "maxLength": 64 },
+        "amount": { "type": "number" },
+        "month": { "type": "string", "maxLength": 20 },
+        "paymentDate": { "type": "string", "maxLength": 20 },
+        "method": { "type": "string", "enum": ["cash", "bank_transfer", "check", "ccp"] },
+        "receiptNumber": { "type": "string", "maxLength": 64 },
+        "status": { "type": "string", "enum": ["paid", "partial", "unpaid"] },
+        "notes": { "type": "string", "maxLength": 500 },
+        "recordedBy": { "type": "string", "maxLength": 128 },
+        "recordedByName": { "type": "string", "maxLength": 120 },
+        "createdAt": { "type": "string", "maxLength": 40 }
+      },
+      "required": ["id", "playerId", "amount", "paymentDate", "method", "receiptNumber", "status", "serverCreatedAt", "serverUpdatedAt"]
+    },
+    "FinanceEntry": {
+      "title": "FinanceEntry",
+      "description": "Admin-only income/expense ledger entry.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "seasonId": { "type": "string", "maxLength": 128 },
+        "seasonName": { "type": "string", "maxLength": 64 },
+        "kind": { "type": "string", "enum": ["income", "expense"] },
+        "category": { "type": "string", "maxLength": 120 },
+        "title": { "type": "string", "minLength": 1, "maxLength": 160 },
+        "amount": { "type": "number" },
+        "date": { "type": "string", "maxLength": 20 },
+        "method": { "type": "string", "enum": ["cash", "bank_transfer", "check", "ccp"] },
+        "receiptNumber": { "type": "string", "maxLength": 64 },
+        "notes": { "type": "string", "maxLength": 500 },
+        "recordedBy": { "type": "string", "maxLength": 128 },
+        "recordedByName": { "type": "string", "maxLength": 120 },
+        "createdAt": { "type": "string", "maxLength": 40 }
+      },
+      "required": ["id", "kind", "title", "amount", "date", "method", "serverCreatedAt", "serverUpdatedAt"]
+    },
+    "Announcement": {
+      "title": "Announcement",
+      "description": "Club announcement targeted by audience.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "title": { "type": "string", "minLength": 1, "maxLength": 160 },
+        "body": { "type": "string", "minLength": 1, "maxLength": 3000 },
+        "type": { "type": "string", "enum": ["general", "category", "training_cancel", "match", "program_change", "admin_notice"] },
+        "targetAudience": { "type": "string", "enum": ["all", "coaches", "parents", "category"] },
+        "targetCategoryId": { "type": "string", "maxLength": 64 },
+        "pinned": { "type": "boolean" },
+        "authorId": { "type": "string", "maxLength": 128 },
+        "authorName": { "type": "string", "maxLength": 120 },
+        "createdAt": { "type": "string", "maxLength": 40 }
+      },
+      "required": ["id", "title", "body", "type", "targetAudience", "pinned", "authorId", "authorName", "serverCreatedAt", "serverUpdatedAt"]
+    },
+    "NotificationItem": {
+      "title": "NotificationItem",
+      "description": "User-scoped notification item.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "userId": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "authUid": { "type": "string", "maxLength": 128 },
+        "title": { "type": "string", "minLength": 1, "maxLength": 160 },
+        "message": { "type": "string", "minLength": 1, "maxLength": 1000 },
+        "type": { "type": "string", "maxLength": 64 },
+        "relatedId": { "type": "string", "maxLength": 128 },
+        "read": { "type": "boolean" },
+        "createdAt": { "type": "string", "maxLength": 40 }
+      },
+      "required": ["id", "userId", "title", "message", "read", "serverCreatedAt", "serverUpdatedAt"]
+    },
+    "EvaluationRecord": {
+      "title": "EvaluationRecord",
+      "description": "Player technical and physical evaluation.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "playerId": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "playerName": { "type": "string", "maxLength": 120 },
+        "categoryId": { "type": "string", "minLength": 1, "maxLength": 64 },
+        "parentAuthUid": { "type": "string", "maxLength": 128 },
+        "authorizedCoachUids": { "type": "array" },
+        "coachId": { "type": "string", "maxLength": 128 },
+        "coachName": { "type": "string", "maxLength": 120 },
+        "date": { "type": "string", "maxLength": 20 },
+        "period": { "type": "string", "maxLength": 64 },
+        "scores": { "type": "object" },
+        "overallAverage": { "type": "number" },
+        "notes": { "type": "string", "maxLength": 1000 },
+        "published": { "type": "boolean" },
+        "approvedByAdmin": { "type": "boolean" },
+        "createdAt": { "type": "string", "maxLength": 40 }
+      },
+      "required": ["id", "playerId", "categoryId", "date", "scores", "overallAverage", "published", "authorizedCoachUids", "serverCreatedAt", "serverUpdatedAt"]
+    },
+    "CoachReport": {
+      "title": "CoachReport",
+      "description": "Technical report submitted by a coach to administration.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "coachId": { "type": "string", "maxLength": 128 },
+        "coachUserId": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "coachAuthUid": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "coachName": { "type": "string", "maxLength": 120 },
+        "categoryId": { "type": "string", "minLength": 1, "maxLength": 64 },
+        "title": { "type": "string", "minLength": 1, "maxLength": 160 },
+        "summary": { "type": "string", "minLength": 1, "maxLength": 3000 },
+        "recommendations": { "type": "string", "maxLength": 1500 },
+        "status": { "type": "string", "enum": ["pending", "reviewed"] },
+        "adminNote": { "type": "string", "maxLength": 1000 },
+        "createdAt": { "type": "string", "maxLength": 40 }
+      },
+      "required": ["id", "coachUserId", "coachAuthUid", "coachName", "categoryId", "title", "summary", "status", "serverCreatedAt", "serverUpdatedAt"]
+    },
+    "RegistrationRequest": {
+      "title": "RegistrationRequest",
+      "description": "Online player registration request with documents.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "fullName": { "type": "string", "minLength": 1, "maxLength": 120 },
+        "birthDate": { "type": "string", "maxLength": 20 },
+        "categoryId": { "type": "string", "maxLength": 64 },
+        "parentName": { "type": "string", "maxLength": 120 },
+        "parentPhone": { "type": "string", "maxLength": 32 },
+        "address": { "type": "string", "maxLength": 240 },
+        "photoUrl": { "type": "string", "maxLength": 1000 },
+        "signedFormUrl": { "type": "string", "maxLength": 1000 },
+        "signedFormName": { "type": "string", "maxLength": 200 },
+        "signedFormMime": { "type": "string", "maxLength": 100 },
+        "medicalNotes": { "type": "string", "maxLength": 1000 },
+        "additionalNotes": { "type": "string", "maxLength": 1000 },
+        "applicantUserId": { "type": "string", "maxLength": 128 },
+        "applicantAuthUid": { "type": "string", "maxLength": 128 },
+        "applicantUsername": { "type": "string", "maxLength": 64 },
+        "status": { "type": "string", "enum": ["pending", "incomplete", "approved", "rejected"] },
+        "adminNotes": { "type": "string", "maxLength": 1000 },
+        "missingDocumentNote": { "type": "string", "maxLength": 1000 },
+        "rejectionReason": { "type": "string", "maxLength": 1000 },
+        "createdPlayerId": { "type": "string", "maxLength": 128 },
+        "submittedAt": { "type": "string", "maxLength": 40 }
+      },
+      "required": ["id", "fullName", "birthDate", "categoryId", "parentName", "parentPhone", "status", "submittedAt", "serverCreatedAt", "serverUpdatedAt"]
+    },
+    "ActivityLog": {
+      "title": "ActivityLog",
+      "description": "Audit log of administrative and coaching actions.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "actorId": { "type": "string", "maxLength": 128 },
+        "actorName": { "type": "string", "maxLength": 120 },
+        "actorRole": { "type": "string", "enum": ["admin", "coach", "parent"] },
+        "action": { "type": "string", "maxLength": 160 },
+        "entityType": { "type": "string", "maxLength": 64 },
+        "entityId": { "type": "string", "maxLength": 128 },
+        "details": { "type": "string", "maxLength": 1000 },
+        "createdAt": { "type": "string", "maxLength": 40 }
+      },
+      "required": ["id", "actorId", "actorName", "actorRole", "action", "entityType", "entityId", "serverCreatedAt", "serverUpdatedAt"]
+    },
+    "MigrationMarker": {
+      "title": "MigrationMarker",
+      "description": "Idempotent migration marker preventing duplicate backup imports.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "minLength": 1, "maxLength": 64, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "completedAt": { "type": "string", "maxLength": 40 },
+        "importedCounts": { "type": "object" },
+        "sourceChecksum": { "type": "string", "maxLength": 128 }
+      },
+      "required": ["id", "completedAt", "sourceChecksum", "serverCreatedAt", "serverUpdatedAt"]
+    },
+    "TalentVideo": {
+      "title": "TalentVideo",
+      "description": "Moderated W.A.B TALENTS short video (<= 60s) with verified parental consent and zero minor PII.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "playerDisplayName": { "type": "string", "minLength": 1, "maxLength": 120 },
+        "linkedPlayerId": { "type": "string", "maxLength": 128 },
+        "uploaderAuthUid": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "uploaderRole": { "type": "string", "enum": ["admin", "coach", "parent"] },
+        "isMinor": { "type": "boolean" },
+        "parentVerifiedConsent": { "type": "boolean" },
+        "parentConsentSignerName": { "type": "string", "minLength": 1, "maxLength": 120 },
+        "parentConsentAt": { "type": "string", "maxLength": 40 },
+        "title": { "type": "string", "minLength": 1, "maxLength": 160 },
+        "description": { "type": "string", "maxLength": 1000 },
+        "videoUrl": { "type": "string", "minLength": 1, "maxLength": 1200 },
+        "thumbnailUrl": { "type": "string", "maxLength": 1200 },
+        "durationSeconds": { "type": "number" },
+        "fileSizeBytes": { "type": "number" },
+        "mimeType": { "type": "string", "maxLength": 80 },
+        "position": { "type": "string", "enum": ["goalkeeper", "defender", "midfielder", "forward", "winger"] },
+        "ageCategory": { "type": "string", "maxLength": 32 },
+        "city": { "type": "string", "minLength": 1, "maxLength": 100 },
+        "province": { "type": "string", "minLength": 1, "maxLength": 100 },
+        "competitionCategory": { "type": "string", "enum": ["showcase", "best_dribbler", "best_goal", "best_free_kick", "best_goalkeeper", "best_skills"] },
+        "submissionTier": { "type": "string", "enum": ["free_first", "paid_extra"] },
+        "paymentStatus": { "type": "string", "enum": ["free", "pending_payment", "confirmed", "waived"] },
+        "paymentReference": { "type": "string", "maxLength": 120 },
+        "moderationStatus": { "type": "string", "enum": ["pending", "approved", "rejected", "removed"] },
+        "moderationNote": { "type": "string", "maxLength": 500 },
+        "moderatedByUid": { "type": "string", "maxLength": 128 },
+        "moderatedAt": { "type": "string", "maxLength": 40 },
+        "isFeatured": { "type": "boolean" },
+        "featuredWeekLabel": { "type": "string", "maxLength": 64 },
+        "likesCount": { "type": "number" },
+        "viewsCount": { "type": "number" },
+        "sharesCount": { "type": "number" },
+        "reportsCount": { "type": "number" },
+        "createdAt": { "type": "string", "maxLength": 40 }
+      },
+      "required": ["id", "playerDisplayName", "uploaderAuthUid", "uploaderRole", "isMinor", "parentVerifiedConsent", "parentConsentSignerName", "parentConsentAt", "title", "videoUrl", "durationSeconds", "fileSizeBytes", "mimeType", "position", "ageCategory", "city", "province", "competitionCategory", "submissionTier", "paymentStatus", "moderationStatus", "isFeatured", "likesCount", "viewsCount", "sharesCount", "reportsCount", "serverCreatedAt", "serverUpdatedAt"]
+    },
+    "TalentLike": {
+      "title": "TalentLike",
+      "description": "User like marker keyed by videoId_uid.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "videoId": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "userUid": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "createdAt": { "type": "string", "maxLength": 40 }
+      },
+      "required": ["id", "videoId", "userUid", "serverCreatedAt", "serverUpdatedAt"]
+    },
+    "TalentWatchlistItem": {
+      "title": "TalentWatchlistItem",
+      "description": "Authorized coach/admin scouting watchlist entry.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "scoutUid": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "scoutName": { "type": "string", "maxLength": 120 },
+        "scoutRole": { "type": "string", "enum": ["admin", "coach"] },
+        "videoId": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "playerDisplayName": { "type": "string", "maxLength": 120 },
+        "ageCategory": { "type": "string", "maxLength": 32 },
+        "position": { "type": "string", "maxLength": 32 },
+        "city": { "type": "string", "maxLength": 100 },
+        "province": { "type": "string", "maxLength": 100 },
+        "notes": { "type": "string", "maxLength": 500 },
+        "trialInviteSent": { "type": "boolean" },
+        "createdAt": { "type": "string", "maxLength": 40 }
+      },
+      "required": ["id", "scoutUid", "scoutName", "scoutRole", "videoId", "playerDisplayName", "ageCategory", "position", "city", "province", "serverCreatedAt", "serverUpdatedAt"]
+    },
+    "TalentTrialInvite": {
+      "title": "TalentTrialInvite",
+      "description": "Official club trial invitation addressed to verified parent/guardian account (no direct minor chat).",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "videoId": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "playerDisplayName": { "type": "string", "maxLength": 120 },
+        "targetParentAuthUid": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "invitedByUid": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "invitedByName": { "type": "string", "maxLength": 120 },
+        "invitedByRole": { "type": "string", "enum": ["admin", "coach"] },
+        "categoryId": { "type": "string", "maxLength": 32 },
+        "trialDate": { "type": "string", "maxLength": 20 },
+        "trialTime": { "type": "string", "maxLength": 16 },
+        "trialVenue": { "type": "string", "maxLength": 160 },
+        "officialMessage": { "type": "string", "maxLength": 1000 },
+        "status": { "type": "string", "enum": ["pending", "accepted", "declined", "completed"] },
+        "parentResponseNote": { "type": "string", "maxLength": 500 },
+        "createdAt": { "type": "string", "maxLength": 40 }
+      },
+      "required": ["id", "videoId", "playerDisplayName", "targetParentAuthUid", "invitedByUid", "invitedByName", "invitedByRole", "categoryId", "trialDate", "trialTime", "trialVenue", "officialMessage", "status", "serverCreatedAt", "serverUpdatedAt"]
+    },
+    "TalentCompetition": {
+      "title": "TalentCompetition",
+      "description": "Weekly W.A.B TALENTS competition category & winner.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "weekLabel": { "type": "string", "maxLength": 64 },
+        "categoryKey": { "type": "string", "enum": ["best_dribbler", "best_goal", "best_free_kick", "best_goalkeeper", "best_skills"] },
+        "titleAr": { "type": "string", "maxLength": 120 },
+        "titleFr": { "type": "string", "maxLength": 120 },
+        "descriptionAr": { "type": "string", "maxLength": 500 },
+        "descriptionFr": { "type": "string", "maxLength": 500 },
+        "startDate": { "type": "string", "maxLength": 20 },
+        "endDate": { "type": "string", "maxLength": 20 },
+        "status": { "type": "string", "enum": ["active", "closed"] },
+        "winnerVideoId": { "type": "string", "maxLength": 128 },
+        "winnerPlayerName": { "type": "string", "maxLength": 120 },
+        "isPublic": { "type": "boolean" },
+        "createdAt": { "type": "string", "maxLength": 40 }
+      },
+      "required": ["id", "weekLabel", "categoryKey", "titleAr", "titleFr", "startDate", "endDate", "status", "isPublic", "serverCreatedAt", "serverUpdatedAt"]
+    },
+    "TalentReport": {
+      "title": "TalentReport",
+      "description": "Child protection & content safety report submitted for admin review.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "videoId": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "videoTitle": { "type": "string", "maxLength": 160 },
+        "reporterUid": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "reason": { "type": "string", "enum": ["inappropriate", "minor_safety", "non_football", "spam", "other"] },
+        "details": { "type": "string", "maxLength": 1000 },
+        "status": { "type": "string", "enum": ["pending", "reviewed", "resolved", "dismissed"] },
+        "adminActionNote": { "type": "string", "maxLength": 500 },
+        "createdAt": { "type": "string", "maxLength": 40 }
+      },
+      "required": ["id", "videoId", "videoTitle", "reporterUid", "reason", "status", "serverCreatedAt", "serverUpdatedAt"]
+    },
+    "TalentSettings": {
+      "title": "TalentSettings",
+      "description": "W.A.B TALENTS configuration (free first video, optional paid extra submissions, moderation & child protection defaults).",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "minLength": 1, "maxLength": 64, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "firstSubmissionFree": { "type": "boolean" },
+        "extraSubmissionEnabled": { "type": "boolean" },
+        "extraSubmissionFeeDzd": { "type": "number" },
+        "paymentInstructionsAr": { "type": "string", "maxLength": 500 },
+        "paymentInstructionsFr": { "type": "string", "maxLength": 500 },
+        "maxDurationSeconds": { "type": "number" },
+        "maxFileSizeMb": { "type": "number" },
+        "requireModerationBeforePublic": { "type": "boolean" },
+        "requireParentalConsent": { "type": "boolean" },
+        "isPublic": { "type": "boolean" }
+      },
+      "required": ["id", "firstSubmissionFree", "extraSubmissionEnabled", "extraSubmissionFeeDzd", "maxDurationSeconds", "maxFileSizeMb", "requireModerationBeforePublic", "requireParentalConsent", "isPublic", "serverCreatedAt", "serverUpdatedAt"]
+    }
+  },
+  "firestore": {
+    "/admins/{uid}": {
+      "schema": { "$ref": "#/entities/AdminMarker" },
+      "description": "Trusted administrator marker collection keyed by Firebase Auth UID."
+    },
+    "/users/{uid}": {
+      "schema": { "$ref": "#/entities/UserProfile" },
+      "description": "Club user profile records (admin, coach, parent)."
+    },
+    "/clubSettingsPublic/{settingId}": {
+      "schema": { "$ref": "#/entities/ClubSettingsPublic" },
+      "description": "Public club branding and season metadata."
+    },
+    "/clubSettingsPrivate/{settingId}": {
+      "schema": { "$ref": "#/entities/ClubSettingsPrivate" },
+      "description": "Admin-only club contact and financial defaults."
+    },
+    "/categories/{categoryId}": {
+      "schema": { "$ref": "#/entities/Category" },
+      "description": "Academy age categories."
+    },
+    "/seasons/{seasonId}": {
+      "schema": { "$ref": "#/entities/SeasonRecord" },
+      "description": "Sporting seasons."
+    },
+    "/coaches/{coachId}": {
+      "schema": { "$ref": "#/entities/Coach" },
+      "description": "Academy coaches."
+    },
+    "/players/{playerId}": {
+      "schema": { "$ref": "#/entities/Player" },
+      "description": "Registered academy players."
+    },
+    "/trainingSessions/{sessionId}": {
+      "schema": { "$ref": "#/entities/TrainingSession" },
+      "description": "Training sessions."
+    },
+    "/attendance/{attendanceId}": {
+      "schema": { "$ref": "#/entities/AttendanceRecord" },
+      "description": "Attendance and absence records."
+    },
+    "/matches/{matchId}": {
+      "schema": { "$ref": "#/entities/MatchRecord" },
+      "description": "Match schedules and results."
+    },
+    "/subscriptions/{subscriptionId}": {
+      "schema": { "$ref": "#/entities/AnnualSubscription" },
+      "description": "Admin-only annual subscriptions."
+    },
+    "/payments/{paymentId}": {
+      "schema": { "$ref": "#/entities/PaymentRecord" },
+      "description": "Admin-only payment receipts."
+    },
+    "/financeEntries/{entryId}": {
+      "schema": { "$ref": "#/entities/FinanceEntry" },
+      "description": "Admin-only finance ledger entries."
+    },
+    "/announcements/{announcementId}": {
+      "schema": { "$ref": "#/entities/Announcement" },
+      "description": "Club announcements."
+    },
+    "/notifications/{notificationId}": {
+      "schema": { "$ref": "#/entities/NotificationItem" },
+      "description": "User notifications."
+    },
+    "/evaluations/{evaluationId}": {
+      "schema": { "$ref": "#/entities/EvaluationRecord" },
+      "description": "Player technical evaluations."
+    },
+    "/coachReports/{reportId}": {
+      "schema": { "$ref": "#/entities/CoachReport" },
+      "description": "Technical reports sent by coaches to admins."
+    },
+    "/registrationRequests/{requestId}": {
+      "schema": { "$ref": "#/entities/RegistrationRequest" },
+      "description": "Online player registration requests."
+    },
+    "/activityLogs/{logId}": {
+      "schema": { "$ref": "#/entities/ActivityLog" },
+      "description": "Activity audit logs."
+    },
+    "/migrations/{migrationId}": {
+      "schema": { "$ref": "#/entities/MigrationMarker" },
+      "description": "Idempotent migration markers."
+    },
+    "/talentVideos/{videoId}": {
+      "schema": { "$ref": "#/entities/TalentVideo" },
+      "description": "W.A.B TALENTS player skill videos (moderated, parental consent required)."
+    },
+    "/talentLikes/{likeId}": {
+      "schema": { "$ref": "#/entities/TalentLike" },
+      "description": "Talent video likes per authenticated user."
+    },
+    "/talentWatchlist/{itemId}": {
+      "schema": { "$ref": "#/entities/TalentWatchlistItem" },
+      "description": "Coach and admin scouting watchlist."
+    },
+    "/talentTrialInvites/{inviteId}": {
+      "schema": { "$ref": "#/entities/TalentTrialInvite" },
+      "description": "Official club trial invitations addressed to verified parents."
+    },
+    "/talentCompetitions/{competitionId}": {
+      "schema": { "$ref": "#/entities/TalentCompetition" },
+      "description": "Weekly talent competitions and winners."
+    },
+    "/talentReports/{reportId}": {
+      "schema": { "$ref": "#/entities/TalentReport" },
+      "description": "Content moderation and minor safety reports."
+    },
+    "/talentSettings/{settingId}": {
+      "schema": { "$ref": "#/entities/TalentSettings" },
+      "description": "W.A.B TALENTS fee and safety configuration."
+    }
+  }
+}

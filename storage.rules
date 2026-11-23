@@ -1,0 +1,50 @@
+rules_version = '2';
+
+service firebase.storage {
+  match /b/{bucket}/o {
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isSuperAdmin() {
+      return isSignedIn() &&
+        request.auth.token.email_verified == true &&
+        request.auth.token.email == 'boudiafrabeh8@gmail.com';
+    }
+
+    // W.A.B TALENTS skill videos (scoped to uploader UID, max 50 MB, video MIME only)
+    match /talent-videos/{uploaderUid}/{fileName} {
+      allow read: if true;
+      allow write: if isSignedIn() &&
+        (request.auth.uid == uploaderUid || isSuperAdmin()) &&
+        request.resource != null &&
+        request.resource.size <= 50 * 1024 * 1024 &&
+        request.resource.contentType.matches('video/(mp4|webm|quicktime|x-m4v)');
+    }
+
+    // Optional thumbnails uploaded for W.A.B TALENTS
+    match /talent-thumbnails/{uploaderUid}/{fileName} {
+      allow read: if true;
+      allow write: if isSignedIn() &&
+        (request.auth.uid == uploaderUid || isSuperAdmin()) &&
+        request.resource != null &&
+        request.resource.size <= 5 * 1024 * 1024 &&
+        request.resource.contentType.matches('image/.*');
+    }
+
+    // Club media uploads (player/coach photos, registration forms)
+    match /uploads/{allPaths=**} {
+      allow read: if true;
+      allow write: if isSignedIn() &&
+        request.resource != null &&
+        request.resource.size <= 15 * 1024 * 1024;
+    }
+
+    match /registration-documents/{allPaths=**} {
+      allow read: if isSignedIn();
+      allow write: if isSignedIn() &&
+        request.resource != null &&
+        request.resource.size <= 15 * 1024 * 1024;
+    }
+  }
+}

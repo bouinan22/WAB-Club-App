@@ -1,0 +1,1171 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // Pillar 0: Global Safety Net (Default Deny)
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // Health check document for startup testConnection()
+    match /test/connection {
+      allow get: if true;
+      allow write: if false;
+    }
+
+    // Pillar 3: Reusable Hardened Primitives
+    function isValidId(id) {
+      return id is string && id.size() >= 1 && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isVerified() {
+      return isSignedIn() && request.auth.token.email_verified == true;
+    }
+
+    // Bootstrapped Super Admin
+    function isSuperAdmin() {
+      return isSignedIn() && request.auth.token.email != null && request.auth.token.email.toLower() == 'boudiafrabeh8@gmail.com';
+    }
+
+    // Trusted Admin lookup (for get/create/update/delete, never inside allow list)
+    function isAdmin() {
+      return isSuperAdmin() || (isSignedIn() && exists(/databases/$(database)/documents/admins/$(request.auth.uid)));
+    }
+
+    function isValidString(val, minLen, maxLen) {
+      return val is string && val.size() >= minLen && val.size() <= maxLen;
+    }
+
+    function isValidOptionalString(data, key, maxLen) {
+      return !(key in data) || (data[key] is string && data[key].size() <= maxLen);
+    }
+
+    function isValidStringList(listVal, maxItems, maxItemLen) {
+      return listVal is list &&
+        listVal.size() <= maxItems &&
+        (listVal.size() == 0 || (listVal[0] is string && listVal[0].size() <= maxItemLen));
+    }
+
+    function hasValidCreateTimes(data) {
+      return data.serverCreatedAt == request.time && data.serverUpdatedAt == request.time;
+    }
+
+    function hasValidUpdateTimes(data) {
+      return ('serverCreatedAt' in existing() ? data.serverCreatedAt == existing().serverCreatedAt : (!('serverCreatedAt' in data) || data.serverCreatedAt == request.time)) && data.serverUpdatedAt == request.time;
+    }
+
+    // =========================================================
+    // 1. ADMINS (/admins/{uid})
+    // =========================================================
+    function isValidAdminMarker(data, uid) {
+      return data.keys().hasAll(['uid', 'email', 'role', 'fullName', 'serverCreatedAt', 'serverUpdatedAt']) &&
+        data.keys().hasOnly(['uid', 'email', 'role', 'fullName', 'createdAt', 'serverCreatedAt', 'serverUpdatedAt']) &&
+        data.uid == uid &&
+        isValidString(data.email, 3, 160) &&
+        data.role in ['super_admin', 'admin'] &&
+        isValidString(data.fullName, 1, 120) &&
+        isValidOptionalString(data, 'createdAt', 40);
+    }
+
+    match /admins/{uid} {
+      allow get: if isValidId(uid) && (isSuperAdmin() || (isSignedIn() && request.auth.uid == uid));
+      allow list: if isSuperAdmin();
+      allow create: if isValidId(uid) && isSuperAdmin() && isValidAdminMarker(incoming(), uid) && hasValidCreateTimes(incoming());
+      allow update: if isValidId(uid) && isSuperAdmin() && isValidAdminMarker(incoming(), uid) && hasValidUpdateTimes(incoming());
+      allow delete: if false;
+    }
+
+    // =========================================================
+    // 2. USERS (/users/{uid})
+    // =========================================================
+    function isValidUser(data) {
+      return data.keys().hasAll(['id', 'uid', 'username', 'email', 'fullName', 'role', 'active', 'categoryIds', 'serverCreatedAt', 'serverUpdatedAt']) &&
+        data.keys().hasOnly([
+          'id', 'uid', 'username', 'email', 'fullName', 'role', 'phone',
+          'active', 'categoryIds', 'photoUrl', 'allowCoachPhotoEdit',
+          'scopedPlayerId', 'createdAt', 'lastLoginAt', 'serverCreatedAt', 'serverUpdatedAt'
+        ]) &&
+        isValidId(data.id) &&
+        isValidId(data.uid) &&
+        isValidString(data.username, 1, 64) &&
+        isValidString(data.email, 3, 160) &&
+        isValidString(data.fullName, 1, 120) &&
+        data.role in ['admin', 'coach', 'parent'] &&
+        data.active is bool &&
+        isValidStringList(data.categoryIds, 20, 64) &&
+        isValidOptionalString(data, 'phone', 32) &&
+        isValidOptionalString(data, 'photoUrl', 1000) &&
+        isValidOptionalString(data, 'scopedPlayerId', 128) &&
+        isValidOptionalString(data, 'createdAt', 40) &&
+        isValidOptionalString(data, 'lastLoginAt', 40) &&
+        (!('allowCoachPhotoEdit' in data) || data.allowCoachPhotoEdit is bool);
+    }
+
+    match /users/{uid} {
+      allow get: if isValidId(uid) && (isAdmin() || (isSignedIn() && request.auth.uid == uid));
+      allow list: if isSuperAdmin() || (isSignedIn() && resource.data.uid == request.auth.uid);
+      allow create: if isValidId(uid) && isValidUser(incoming()) && hasValidCreateTimes(incoming()) && (
+        isAdmin() ||
+        (isSignedIn() && request.auth.uid == uid && incoming().uid == uid && incoming().role == 'parent')
+      );
+      allow update: if isValidId(uid) && isValidUser(incoming()) && hasValidUpdateTimes(incoming()) && (
+        isAdmin() ||
+        (
+          isSignedIn() &&
+          request.auth.uid == uid &&
+          incoming().uid == existing().uid &&
+          incoming().role == existing().role &&
+          incoming().active == existing().active &&
+          incoming().categoryIds == existing().categoryIds &&
+          incoming().diff(existing()).affectedKeys().hasOnly(['lastLoginAt', 'phone', 'photoUrl', 'serverUpdatedAt'])
+        )
+      );
+      allow delete: if isValidId(uid) && isAdmin() && uid != request.auth.uid;
+    }
+
+    // =========================================================
+    // 3. CLUB SETTINGS PUBLIC & PRIVATE
+    // =========================================================
+    function isValidClubPublic(data) {
+      return data.keys().hasAll(['id', 'clubName', 'clubShortName', 'logoUrl', 'primaryColor', 'season', 'isPublic', 'serverCreatedAt', 'serverUpdatedAt']) &&
+        data.keys().hasOnly([
+          'id', 'clubName', 'clubShortName', 'clubEnglishName', 'foundedYear',
+          'logoUrl', 'primaryColor', 'secondaryColor', 'surfaceColor',
+          'address', 'season', 'seasonStartDate', 'seasonEndDate',
+          'venues', 'currency', 'isPublic', 'serverCreatedAt', 'serverUpdatedAt'
+        ]) &&
+        isValidId(data.id) &&
+        data.isPublic == true &&
+        isValidString(data.clubName, 1, 120) &&
+        isValidString(data.clubShortName, 1, 32) &&
+        isValidString(data.logoUrl, 1, 2000) &&
+        isValidString(data.primaryColor, 1, 20) &&
+        isValidString(data.season, 1, 40) &&
+        isValidOptionalString(data, 'clubEnglishName', 120) &&
+        isValidOptionalString(data, 'foundedYear', 10) &&
+        isValidOptionalString(data, 'secondaryColor', 20) &&
+        isValidOptionalString(data, 'surfaceColor', 20) &&
+        isValidOptionalString(data, 'address', 200) &&
+        isValidOptionalString(data, 'seasonStartDate', 20) &&
+        isValidOptionalString(data, 'seasonEndDate', 20) &&
+        isValidOptionalString(data, 'currency', 16) &&
+        (!('venues' in data) || isValidStringList(data.venues, 20, 160));
+    }
+
+    match /clubSettingsPublic/{settingId} {
+      allow get: if isValidId(settingId);
+      allow list: if resource.data.isPublic == true;
+      allow create: if isValidId(settingId) && isAdmin() && isValidClubPublic(incoming()) && hasValidCreateTimes(incoming());
+      allow update: if isValidId(settingId) && isAdmin() && isValidClubPublic(incoming()) && hasValidUpdateTimes(incoming());
+      allow delete: if false;
+    }
+
+    function isValidClubPrivate(data) {
+      return data.keys().hasAll(['id', 'defaultAnnualFee', 'allowInstallments', 'serverCreatedAt', 'serverUpdatedAt']) &&
+        data.keys().hasOnly([
+          'id', 'phone', 'email', 'subscriptionStartDate', 'subscriptionEndDate',
+          'defaultAnnualFee', 'allowInstallments', 'serverCreatedAt', 'serverUpdatedAt'
+        ]) &&
+        isValidId(data.id) &&
+        data.defaultAnnualFee is number &&
+        data.allowInstallments is bool &&
+        isValidOptionalString(data, 'phone', 40) &&
+        isValidOptionalString(data, 'email', 160) &&
+        isValidOptionalString(data, 'subscriptionStartDate', 20) &&
+        isValidOptionalString(data, 'subscriptionEndDate', 20);
+    }
+
+    match /clubSettingsPrivate/{settingId} {
+      allow get: if isValidId(settingId) && isAdmin();
+      allow list: if isSuperAdmin();
+      allow create: if isValidId(settingId) && isAdmin() && isValidClubPrivate(incoming()) && hasValidCreateTimes(incoming());
+      allow update: if isValidId(settingId) && isAdmin() && isValidClubPrivate(incoming()) && hasValidUpdateTimes(incoming());
+      allow delete: if false;
+    }
+
+    // =========================================================
+    // 4. CATEGORIES, CATEGORY FEES (ADMIN-ONLY) & SEASONS
+    // =========================================================
+    function isValidCategory(data) {
+      return data.keys().hasAll(['id', 'code', 'name', 'ageRange', 'description', 'isActive', 'serverCreatedAt', 'serverUpdatedAt']) &&
+        data.keys().hasOnly([
+          'id', 'code', 'name', 'ageRange', 'description', 'isActive',
+          'authorizedCoachUids', 'serverCreatedAt', 'serverUpdatedAt'
+        ]) &&
+        isValidId(data.id) &&
+        isValidString(data.code, 1, 20) &&
+        isValidString(data.name, 1, 120) &&
+        isValidString(data.ageRange, 1, 64) &&
+        isValidString(data.description, 0, 500) &&
+        data.isActive is bool &&
+        (!('authorizedCoachUids' in data) || isValidStringList(data.authorizedCoachUids, 30, 128));
+    }
+
+    match /categories/{categoryId} {
+      allow get: if isValidId(categoryId) && isSignedIn();
+      allow list: if isSuperAdmin() || (isSignedIn() && resource.data.isActive == true);
+      allow create: if isValidId(categoryId) && isAdmin() && isValidCategory(incoming()) && hasValidCreateTimes(incoming());
+      allow update: if isValidId(categoryId) && isAdmin() && isValidCategory(incoming()) && hasValidUpdateTimes(incoming());
+      allow delete: if isValidId(categoryId) && isAdmin();
+    }
+
+    function isValidCategoryFee(data) {
+      return data.keys().hasAll(['id', 'categoryId', 'annualFee', 'serverCreatedAt', 'serverUpdatedAt']) &&
+        data.keys().hasOnly(['id', 'categoryId', 'annualFee', 'monthlyFee', 'serverCreatedAt', 'serverUpdatedAt']) &&
+        isValidId(data.id) &&
+        isValidId(data.categoryId) &&
+        data.annualFee is number &&
+        (!('monthlyFee' in data) || data.monthlyFee is number);
+    }
+
+    match /categoryFees/{categoryId} {
+      allow get: if isValidId(categoryId) && isAdmin();
+      allow list: if isSuperAdmin();
+      allow create: if isValidId(categoryId) && isAdmin() && isValidCategoryFee(incoming()) && hasValidCreateTimes(incoming());
+      allow update: if isValidId(categoryId) && isAdmin() && isValidCategoryFee(incoming()) && hasValidUpdateTimes(incoming());
+      allow delete: if isValidId(categoryId) && isAdmin();
+    }
+
+    function isValidSeason(data) {
+      return data.keys().hasAll(['id', 'name', 'startDate', 'endDate', 'status', 'serverCreatedAt', 'serverUpdatedAt']) &&
+        data.keys().hasOnly([
+          'id', 'name', 'startDate', 'endDate', 'subscriptionStartDate', 'subscriptionEndDate',
+          'defaultAnnualFee', 'allowInstallments', 'status', 'createdAt', 'serverCreatedAt', 'serverUpdatedAt'
+        ]) &&
+        isValidId(data.id) &&
+        isValidString(data.name, 1, 64) &&
+        isValidString(data.startDate, 4, 20) &&
+        isValidString(data.endDate, 4, 20) &&
+        data.status in ['active', 'archived'] &&
+        isValidOptionalString(data, 'subscriptionStartDate', 20) &&
+        isValidOptionalString(data, 'subscriptionEndDate', 20) &&
+        isValidOptionalString(data, 'createdAt', 40) &&
+        (!('defaultAnnualFee' in data) || data.defaultAnnualFee is number) &&
+        (!('allowInstallments' in data) || data.allowInstallments is bool);
+    }
+
+    match /seasons/{seasonId} {
+      allow get: if isValidId(seasonId) && isSignedIn();
+      allow list: if isSuperAdmin() || (isSignedIn() && resource.data.status in ['active', 'archived']);
+      allow create: if isValidId(seasonId) && isAdmin() && isValidSeason(incoming()) && hasValidCreateTimes(incoming());
+      allow update: if isValidId(seasonId) && isAdmin() && isValidSeason(incoming()) && hasValidUpdateTimes(incoming());
+      allow delete: if isValidId(seasonId) && isAdmin();
+    }
+
+    // =========================================================
+    // 5. COACHES (/coaches/{coachId})
+    // =========================================================
+    function isValidCoach(data) {
+      return data.keys().hasAll(['id', 'userId', 'fullName', 'email', 'categoryIds', 'active', 'joinedAt', 'serverCreatedAt', 'serverUpdatedAt']) &&
+        data.keys().hasOnly([
+          'id', 'userId', 'authUid', 'fullName', 'phone', 'email', 'specialty',
+          'categoryIds', 'trainingProgram', 'active', 'joinedAt', 'photoUrl',
+          'allowCoachPhotoEdit', 'serverCreatedAt', 'serverUpdatedAt'
+        ]) &&
+        isValidId(data.id) &&
+        isValidString(data.userId, 1, 128) &&
+        isValidOptionalString(data, 'authUid', 128) &&
+        isValidString(data.fullName, 1, 120) &&
+        isValidOptionalString(data, 'phone', 32) &&
+        isValidString(data.email, 3, 160) &&
+        isValidOptionalString(data, 'specialty', 160) &&
+        isValidStringList(data.categoryIds, 20, 64) &&
+        isValidOptionalString(data, 'trainingProgram', 1000) &&
+        data.active is bool &&
+        isValidString(data.joinedAt, 4, 40) &&
+        isValidOptionalString(data, 'photoUrl', 2000) &&
+        (!('allowCoachPhotoEdit' in data) || data.allowCoachPhotoEdit is bool);
+    }
+
+    match /coaches/{coachId} {
+      allow get: if isValidId(coachId) && (isAdmin() || (isSignedIn() && resource.data.authUid == request.auth.uid));
+      allow list: if isSuperAdmin() || (isSignedIn() && resource.data.authUid == request.auth.uid);
+      allow create: if isValidId(coachId) && isAdmin() && isValidCoach(incoming()) && hasValidCreateTimes(incoming());
+      allow update: if isValidId(coachId) && isValidCoach(incoming()) && hasValidUpdateTimes(incoming()) && (
+        isAdmin() ||
+        (
+          isSignedIn() &&
+          existing().authUid == request.auth.uid &&
+          existing().allowCoachPhotoEdit == true &&
+          incoming().diff(existing()).affectedKeys().hasOnly(['photoUrl', 'serverUpdatedAt'])
+        )
+      );
+      allow delete: if isValidId(coachId) && isAdmin();
+    }
+
+    // =========================================================
+    // 6. PLAYERS (/players/{playerId})
+    // =========================================================
+    function isValidPlayer(data) {
+      return data.keys().hasAll(['id', 'fullName', 'birthDate', 'categoryId', 'parentName', 'parentPhone', 'parentUserId', 'registrationDate', 'status', 'authorizedCoachUids', 'serverCreatedAt', 'serverUpdatedAt']) &&
+        data.keys().hasOnly([
+          'id', 'fullName', 'photoUrl', 'birthDate', 'categoryId',
+          'parentName', 'parentPhone', 'parentUserId', 'parentAuthUid',
+          'authorizedCoachUids', 'coachNames', 'address', 'registrationDate',
+          'status', 'jerseyNumber', 'position', 'adminNotes', 'medicalNotes',
+          'serverCreatedAt', 'serverUpdatedAt'
+        ]) &&
+        isValidId(data.id) &&
+        isValidString(data.fullName, 1, 120) &&
+        isValidOptionalString(data, 'photoUrl', 2000) &&
+        isValidString(data.birthDate, 4, 20) &&
+        isValidString(data.categoryId, 1, 64) &&
+        isValidOptionalString(data, 'parentName', 120) &&
+        isValidOptionalString(data, 'parentPhone', 32) &&
+        isValidOptionalString(data, 'parentUserId', 128) &&
+        isValidOptionalString(data, 'parentAuthUid', 128) &&
+        isValidStringList(data.authorizedCoachUids, 30, 128) &&
+        (!('coachNames' in data) || isValidStringList(data.coachNames, 30, 120)) &&
+        isValidOptionalString(data, 'address', 240) &&
+        isValidString(data.registrationDate, 4, 40) &&
+        data.status in ['active', 'inactive', 'archived'] &&
+        (!('jerseyNumber' in data) || data.jerseyNumber is number) &&
+        isValidOptionalString(data, 'position', 80) &&
+        isValidOptionalString(data, 'adminNotes', 1000) &&
+        isValidOptionalString(data, 'medicalNotes', 1000);
+    }
+
+    match /players/{playerId} {
+      allow get: if isValidId(playerId) && (
+        isAdmin() ||
+        (isSignedIn() && (
+          resource.data.parentAuthUid == request.auth.uid ||
+          request.auth.uid in resource.data.authorizedCoachUids
+        ))
+      );
+      allow list: if isSuperAdmin() || (
+        isSignedIn() && (
+          resource.data.parentAuthUid == request.auth.uid ||
+          request.auth.uid in resource.data.authorizedCoachUids
+        )
+      );
+      allow create: if isValidId(playerId) && isAdmin() && isValidPlayer(incoming()) && hasValidCreateTimes(incoming());
+      allow update: if isValidId(playerId) && isAdmin() && isValidPlayer(incoming()) && hasValidUpdateTimes(incoming());
+      allow delete: if isValidId(playerId) && isAdmin();
+    }
+
+    // =========================================================
+    // 7. TRAINING SESSIONS, ATTENDANCE, MATCHES, EVALUATIONS
+    // =========================================================
+    function isValidTraining(data) {
+      return data.keys().hasAll(['id', 'title', 'categoryId', 'date', 'status', 'authorizedCoachUids', 'serverCreatedAt', 'serverUpdatedAt']) &&
+        data.keys().hasOnly([
+          'id', 'title', 'categoryId', 'coachId', 'coachName', 'coachPhotoUrl',
+          'authorizedCoachUids', 'date', 'startTime', 'endTime', 'venue',
+          'objectives', 'notes', 'status', 'createdAt', 'serverCreatedAt', 'serverUpdatedAt'
+        ]) &&
+        isValidId(data.id) &&
+        isValidString(data.title, 1, 160) &&
+        isValidString(data.categoryId, 1, 64) &&
+        isValidOptionalString(data, 'coachId', 128) &&
+        isValidOptionalString(data, 'coachName', 120) &&
+        isValidOptionalString(data, 'coachPhotoUrl', 1000) &&
+        isValidStringList(data.authorizedCoachUids, 30, 128) &&
+        isValidString(data.date, 4, 20) &&
+        isValidOptionalString(data, 'startTime', 16) &&
+        isValidOptionalString(data, 'endTime', 16) &&
+        isValidOptionalString(data, 'venue', 160) &&
+        isValidOptionalString(data, 'objectives', 1000) &&
+        isValidOptionalString(data, 'notes', 1000) &&
+        data.status in ['scheduled', 'completed', 'cancelled'] &&
+        isValidOptionalString(data, 'createdAt', 40);
+    }
+
+    match /trainingSessions/{sessionId} {
+      allow get: if isValidId(sessionId) && isSignedIn();
+      allow list: if isSuperAdmin() || (isSignedIn() && (
+        request.auth.uid in resource.data.authorizedCoachUids ||
+        resource.data.status in ['scheduled', 'completed', 'cancelled']
+      ));
+      allow create: if isValidId(sessionId) && isValidTraining(incoming()) && hasValidCreateTimes(incoming()) && (
+        isAdmin() || (isSignedIn() && request.auth.uid in incoming().authorizedCoachUids)
+      );
+      allow update: if isValidId(sessionId) && isValidTraining(incoming()) && hasValidUpdateTimes(incoming()) && (
+        isAdmin() || (
+          isSignedIn() &&
+          request.auth.uid in existing().authorizedCoachUids &&
+          incoming().diff(existing()).affectedKeys().hasOnly(['title', 'date', 'startTime', 'endTime', 'venue', 'objectives', 'notes', 'status', 'serverUpdatedAt'])
+        )
+      );
+      allow delete: if isValidId(sessionId) && isAdmin();
+    }
+
+    function isValidAttendance(data) {
+      return data.keys().hasAll(['id', 'playerId', 'playerName', 'categoryId', 'sessionId', 'date', 'status', 'authorizedCoachUids', 'serverCreatedAt', 'serverUpdatedAt']) &&
+        data.keys().hasOnly([
+          'id', 'playerId', 'playerName', 'categoryId', 'parentAuthUid',
+          'authorizedCoachUids', 'sessionId', 'sessionTitle', 'date', 'status',
+          'notes', 'recordedBy', 'recordedByName', 'updatedAt', 'serverCreatedAt', 'serverUpdatedAt'
+        ]) &&
+        isValidId(data.id) &&
+        isValidId(data.playerId) &&
+        isValidString(data.playerName, 1, 120) &&
+        isValidString(data.categoryId, 1, 64) &&
+        isValidOptionalString(data, 'parentAuthUid', 128) &&
+        isValidStringList(data.authorizedCoachUids, 30, 128) &&
+        isValidId(data.sessionId) &&
+        isValidOptionalString(data, 'sessionTitle', 160) &&
+        isValidString(data.date, 4, 20) &&
+        data.status in ['present', 'absent', 'excused'] &&
+        isValidOptionalString(data, 'notes', 500) &&
+        isValidOptionalString(data, 'recordedBy', 128) &&
+        isValidOptionalString(data, 'recordedByName', 120) &&
+        isValidOptionalString(data, 'updatedAt', 40);
+    }
+
+    match /attendance/{attendanceId} {
+      allow get: if isValidId(attendanceId) && (
+        isAdmin() || (isSignedIn() && (
+          resource.data.parentAuthUid == request.auth.uid ||
+          request.auth.uid in resource.data.authorizedCoachUids
+        ))
+      );
+      allow list: if isSuperAdmin() || (isSignedIn() && (
+        resource.data.parentAuthUid == request.auth.uid ||
+        request.auth.uid in resource.data.authorizedCoachUids
+      ));
+      allow create: if isValidId(attendanceId) && isValidAttendance(incoming()) && hasValidCreateTimes(incoming()) && (
+        isAdmin() || (isSignedIn() && request.auth.uid in incoming().authorizedCoachUids)
+      );
+      allow update: if isValidId(attendanceId) && isValidAttendance(incoming()) && hasValidUpdateTimes(incoming()) && (
+        isAdmin() || (
+          isSignedIn() &&
+          request.auth.uid in existing().authorizedCoachUids &&
+          incoming().diff(existing()).affectedKeys().hasOnly(['status', 'notes', 'recordedBy', 'recordedByName', 'updatedAt', 'serverUpdatedAt'])
+        )
+      );
+      allow delete: if isValidId(attendanceId) && isAdmin();
+    }
+
+    function isValidMatch(data) {
+      return data.keys().hasAll(['id', 'opponent', 'categoryId', 'date', 'locationType', 'status', 'authorizedCoachUids', 'serverCreatedAt', 'serverUpdatedAt']) &&
+        data.keys().hasOnly([
+          'id', 'opponent', 'categoryId', 'authorizedCoachUids', 'date', 'time',
+          'venue', 'locationType', 'status', 'goalsFor', 'goalsAgainst',
+          'technicalNotes', 'createdAt', 'serverCreatedAt', 'serverUpdatedAt'
+        ]) &&
+        isValidId(data.id) &&
+        isValidString(data.opponent, 1, 160) &&
+        isValidString(data.categoryId, 1, 64) &&
+        isValidStringList(data.authorizedCoachUids, 30, 128) &&
+        isValidString(data.date, 4, 20) &&
+        isValidOptionalString(data, 'time', 16) &&
+        isValidOptionalString(data, 'venue', 160) &&
+        data.locationType in ['home', 'away'] &&
+        data.status in ['scheduled', 'completed', 'cancelled', 'postponed'] &&
+        (!('goalsFor' in data) || data.goalsFor is number) &&
+        (!('goalsAgainst' in data) || data.goalsAgainst is number) &&
+        isValidOptionalString(data, 'technicalNotes', 1000) &&
+        isValidOptionalString(data, 'createdAt', 40);
+    }
+
+    match /matches/{matchId} {
+      allow get: if isValidId(matchId) && isSignedIn();
+      allow list: if isSuperAdmin() || (isSignedIn() && (
+        request.auth.uid in resource.data.authorizedCoachUids ||
+        resource.data.status in ['scheduled', 'completed', 'cancelled', 'postponed']
+      ));
+      allow create: if isValidId(matchId) && isValidMatch(incoming()) && hasValidCreateTimes(incoming()) && (
+        isAdmin() || (isSignedIn() && request.auth.uid in incoming().authorizedCoachUids)
+      );
+      allow update: if isValidId(matchId) && isValidMatch(incoming()) && hasValidUpdateTimes(incoming()) && (
+        isAdmin() || (
+          isSignedIn() &&
+          request.auth.uid in existing().authorizedCoachUids &&
+          incoming().diff(existing()).affectedKeys().hasOnly(['opponent', 'date', 'time', 'venue', 'locationType', 'goalsFor', 'goalsAgainst', 'status', 'technicalNotes', 'serverUpdatedAt'])
+        )
+      );
+      allow delete: if isValidId(matchId) && isAdmin();
+    }
+
+    function isValidEvaluation(data) {
+      return data.keys().hasAll(['id', 'playerId', 'categoryId', 'date', 'scores', 'overallAverage', 'published', 'authorizedCoachUids', 'serverCreatedAt', 'serverUpdatedAt']) &&
+        data.keys().hasOnly([
+          'id', 'playerId', 'playerName', 'categoryId', 'parentAuthUid',
+          'authorizedCoachUids', 'coachId', 'coachName', 'date', 'period',
+          'scores', 'overallAverage', 'notes', 'published', 'approvedByAdmin',
+          'createdAt', 'serverCreatedAt', 'serverUpdatedAt'
+        ]) &&
+        isValidId(data.id) &&
+        isValidId(data.playerId) &&
+        isValidOptionalString(data, 'playerName', 120) &&
+        isValidString(data.categoryId, 1, 64) &&
+        isValidOptionalString(data, 'parentAuthUid', 128) &&
+        isValidStringList(data.authorizedCoachUids, 30, 128) &&
+        isValidOptionalString(data, 'coachId', 128) &&
+        isValidOptionalString(data, 'coachName', 120) &&
+        isValidString(data.date, 4, 20) &&
+        isValidOptionalString(data, 'period', 64) &&
+        data.scores is map &&
+        data.overallAverage is number &&
+        isValidOptionalString(data, 'notes', 1000) &&
+        data.published is bool &&
+        (!('approvedByAdmin' in data) || data.approvedByAdmin is bool) &&
+        isValidOptionalString(data, 'createdAt', 40);
+    }
+
+    match /evaluations/{evaluationId} {
+      allow get: if isValidId(evaluationId) && (
+        isAdmin() || (isSignedIn() && (
+          (resource.data.parentAuthUid == request.auth.uid && resource.data.published == true) ||
+          request.auth.uid in resource.data.authorizedCoachUids
+        ))
+      );
+      allow list: if isSuperAdmin() || (isSignedIn() && (
+        (resource.data.parentAuthUid == request.auth.uid && resource.data.published == true) ||
+        request.auth.uid in resource.data.authorizedCoachUids
+      ));
+      allow create: if isValidId(evaluationId) && isValidEvaluation(incoming()) && hasValidCreateTimes(incoming()) && (
+        isAdmin() || (isSignedIn() && request.auth.uid in incoming().authorizedCoachUids)
+      );
+      allow update: if isValidId(evaluationId) && isValidEvaluation(incoming()) && hasValidUpdateTimes(incoming()) && (
+        isAdmin() || (
+          isSignedIn() &&
+          request.auth.uid in existing().authorizedCoachUids &&
+          incoming().diff(existing()).affectedKeys().hasOnly(['scores', 'overallAverage', 'notes', 'published', 'period', 'date', 'serverUpdatedAt'])
+        )
+      );
+      allow delete: if isValidId(evaluationId) && isAdmin();
+    }
+
+    // =========================================================
+    // 8. ADMIN-ONLY FINANCIAL COLLECTIONS
+    // =========================================================
+    function isValidSubscription(data) {
+      return data.keys().hasAll(['id', 'seasonId', 'playerId', 'totalFee', 'paidAmount', 'remainingAmount', 'status', 'serverCreatedAt', 'serverUpdatedAt']) &&
+        data.keys().hasOnly([
+          'id', 'seasonId', 'seasonName', 'playerId', 'playerName', 'categoryId',
+          'totalFee', 'paidAmount', 'remainingAmount', 'status', 'startDate',
+          'endDate', 'notes', 'createdAt', 'updatedAt', 'serverCreatedAt', 'serverUpdatedAt'
+        ]) &&
+        isValidId(data.id) &&
+        isValidString(data.seasonId, 1, 128) &&
+        isValidOptionalString(data, 'seasonName', 64) &&
+        isValidId(data.playerId) &&
+        isValidOptionalString(data, 'playerName', 120) &&
+        isValidOptionalString(data, 'categoryId', 64) &&
+        data.totalFee is number &&
+        data.paidAmount is number &&
+        data.remainingAmount is number &&
+        data.status in ['paid', 'unpaid', 'expired', 'exempt', 'partial'] &&
+        isValidOptionalString(data, 'startDate', 20) &&
+        isValidOptionalString(data, 'endDate', 20) &&
+        isValidOptionalString(data, 'notes', 500) &&
+        isValidOptionalString(data, 'createdAt', 40) &&
+        isValidOptionalString(data, 'updatedAt', 40);
+    }
+
+    match /subscriptions/{subscriptionId} {
+      allow get: if isValidId(subscriptionId) && isAdmin();
+      allow list: if isSuperAdmin();
+      allow create: if isValidId(subscriptionId) && isAdmin() && isValidSubscription(incoming()) && hasValidCreateTimes(incoming());
+      allow update: if isValidId(subscriptionId) && isAdmin() && isValidSubscription(incoming()) && hasValidUpdateTimes(incoming());
+      allow delete: if isValidId(subscriptionId) && isAdmin();
+    }
+
+    function isValidPayment(data) {
+      return data.keys().hasAll(['id', 'playerId', 'amount', 'paymentDate', 'method', 'receiptNumber', 'status', 'serverCreatedAt', 'serverUpdatedAt']) &&
+        data.keys().hasOnly([
+          'id', 'subscriptionId', 'seasonId', 'seasonName', 'playerId', 'playerName',
+          'categoryId', 'amount', 'month', 'paymentDate', 'method', 'receiptNumber',
+          'status', 'notes', 'recordedBy', 'recordedByName', 'createdAt',
+          'serverCreatedAt', 'serverUpdatedAt'
+        ]) &&
+        isValidId(data.id) &&
+        isValidOptionalString(data, 'subscriptionId', 128) &&
+        isValidOptionalString(data, 'seasonId', 128) &&
+        isValidOptionalString(data, 'seasonName', 64) &&
+        isValidId(data.playerId) &&
+        isValidOptionalString(data, 'playerName', 120) &&
+        isValidOptionalString(data, 'categoryId', 64) &&
+        data.amount is number &&
+        isValidOptionalString(data, 'month', 20) &&
+        isValidString(data.paymentDate, 4, 20) &&
+        data.method in ['cash', 'bank_transfer', 'check', 'ccp'] &&
+        isValidString(data.receiptNumber, 1, 64) &&
+        data.status in ['paid', 'partial', 'unpaid'] &&
+        isValidOptionalString(data, 'notes', 500) &&
+        isValidOptionalString(data, 'recordedBy', 128) &&
+        isValidOptionalString(data, 'recordedByName', 120) &&
+        isValidOptionalString(data, 'createdAt', 40);
+    }
+
+    match /payments/{paymentId} {
+      allow get: if isValidId(paymentId) && isAdmin();
+      allow list: if isSuperAdmin();
+      allow create: if isValidId(paymentId) && isAdmin() && isValidPayment(incoming()) && hasValidCreateTimes(incoming());
+      allow update: if isValidId(paymentId) && isAdmin() && isValidPayment(incoming()) && hasValidUpdateTimes(incoming());
+      allow delete: if isValidId(paymentId) && isAdmin();
+    }
+
+    function isValidFinanceEntry(data) {
+      return data.keys().hasAll(['id', 'kind', 'title', 'amount', 'date', 'method', 'serverCreatedAt', 'serverUpdatedAt']) &&
+        data.keys().hasOnly([
+          'id', 'seasonId', 'seasonName', 'kind', 'category', 'title', 'amount',
+          'date', 'method', 'receiptNumber', 'notes', 'recordedBy', 'recordedByName',
+          'createdAt', 'serverCreatedAt', 'serverUpdatedAt'
+        ]) &&
+        isValidId(data.id) &&
+        isValidOptionalString(data, 'seasonId', 128) &&
+        isValidOptionalString(data, 'seasonName', 64) &&
+        data.kind in ['income', 'expense'] &&
+        isValidOptionalString(data, 'category', 120) &&
+        isValidString(data.title, 1, 160) &&
+        data.amount is number &&
+        isValidString(data.date, 4, 20) &&
+        data.method in ['cash', 'bank_transfer', 'check', 'ccp'] &&
+        isValidOptionalString(data, 'receiptNumber', 64) &&
+        isValidOptionalString(data, 'notes', 500) &&
+        isValidOptionalString(data, 'recordedBy', 128) &&
+        isValidOptionalString(data, 'recordedByName', 120) &&
+        isValidOptionalString(data, 'createdAt', 40);
+    }
+
+    match /financeEntries/{entryId} {
+      allow get: if isValidId(entryId) && isAdmin();
+      allow list: if isSuperAdmin();
+      allow create: if isValidId(entryId) && isAdmin() && isValidFinanceEntry(incoming()) && hasValidCreateTimes(incoming());
+      allow update: if isValidId(entryId) && isAdmin() && isValidFinanceEntry(incoming()) && hasValidUpdateTimes(incoming());
+      allow delete: if isValidId(entryId) && isAdmin();
+    }
+
+    // =========================================================
+    // 9. ANNOUNCEMENTS, NOTIFICATIONS, COACH REPORTS, REQUESTS, LOGS, MIGRATIONS
+    // =========================================================
+    function isValidAnnouncement(data) {
+      return data.keys().hasAll(['id', 'title', 'body', 'type', 'targetAudience', 'pinned', 'authorId', 'authorName', 'serverCreatedAt', 'serverUpdatedAt']) &&
+        data.keys().hasOnly([
+          'id', 'title', 'body', 'type', 'targetAudience', 'targetCategoryId',
+          'pinned', 'authorId', 'authorName', 'createdAt', 'serverCreatedAt', 'serverUpdatedAt'
+        ]) &&
+        isValidId(data.id) &&
+        isValidString(data.title, 1, 160) &&
+        isValidString(data.body, 1, 3000) &&
+        data.type in ['general', 'category', 'training_cancel', 'match', 'program_change', 'admin_notice'] &&
+        data.targetAudience in ['all', 'coaches', 'parents', 'category'] &&
+        isValidOptionalString(data, 'targetCategoryId', 64) &&
+        data.pinned is bool &&
+        isValidString(data.authorId, 1, 128) &&
+        isValidString(data.authorName, 1, 120) &&
+        isValidOptionalString(data, 'createdAt', 40);
+    }
+
+    match /announcements/{announcementId} {
+      allow get: if isValidId(announcementId) && isSignedIn();
+      allow list: if isSuperAdmin() || (isSignedIn() && resource.data.targetAudience in ['all', 'coaches', 'parents', 'category']);
+      allow create: if isValidId(announcementId) && isAdmin() && isValidAnnouncement(incoming()) && hasValidCreateTimes(incoming());
+      allow update: if isValidId(announcementId) && isAdmin() && isValidAnnouncement(incoming()) && hasValidUpdateTimes(incoming());
+      allow delete: if isValidId(announcementId) && isAdmin();
+    }
+
+    function isValidNotification(data) {
+      return data.keys().hasAll(['id', 'userId', 'title', 'message', 'read', 'serverCreatedAt', 'serverUpdatedAt']) &&
+        data.keys().hasOnly([
+          'id', 'userId', 'authUid', 'title', 'message', 'type', 'relatedId',
+          'read', 'createdAt', 'serverCreatedAt', 'serverUpdatedAt'
+        ]) &&
+        isValidId(data.id) &&
+        isValidString(data.userId, 1, 128) &&
+        isValidOptionalString(data, 'authUid', 128) &&
+        isValidString(data.title, 1, 160) &&
+        isValidString(data.message, 1, 1000) &&
+        isValidOptionalString(data, 'type', 64) &&
+        isValidOptionalString(data, 'relatedId', 128) &&
+        data.read is bool &&
+        isValidOptionalString(data, 'createdAt', 40);
+    }
+
+    match /notifications/{notificationId} {
+      allow get: if isValidId(notificationId) && (isAdmin() || (isSignedIn() && resource.data.authUid == request.auth.uid));
+      allow list: if isSuperAdmin() || (isSignedIn() && resource.data.authUid == request.auth.uid);
+      allow create: if isValidId(notificationId) && isAdmin() && isValidNotification(incoming()) && hasValidCreateTimes(incoming());
+      allow update: if isValidId(notificationId) && isValidNotification(incoming()) && hasValidUpdateTimes(incoming()) && (
+        isAdmin() || (
+          isSignedIn() &&
+          existing().authUid == request.auth.uid &&
+          incoming().diff(existing()).affectedKeys().hasOnly(['read', 'serverUpdatedAt'])
+        )
+      );
+      allow delete: if isValidId(notificationId) && isAdmin();
+    }
+
+    function isValidCoachReport(data) {
+      return data.keys().hasAll(['id', 'coachUserId', 'coachAuthUid', 'coachName', 'categoryId', 'title', 'summary', 'status', 'serverCreatedAt', 'serverUpdatedAt']) &&
+        data.keys().hasOnly([
+          'id', 'coachId', 'coachUserId', 'coachAuthUid', 'coachName', 'categoryId',
+          'title', 'summary', 'recommendations', 'status', 'adminNote',
+          'createdAt', 'serverCreatedAt', 'serverUpdatedAt'
+        ]) &&
+        isValidId(data.id) &&
+        isValidOptionalString(data, 'coachId', 128) &&
+        isValidString(data.coachUserId, 1, 128) &&
+        isValidId(data.coachAuthUid) &&
+        isValidString(data.coachName, 1, 120) &&
+        isValidString(data.categoryId, 1, 64) &&
+        isValidString(data.title, 1, 160) &&
+        isValidString(data.summary, 1, 3000) &&
+        isValidOptionalString(data, 'recommendations', 1500) &&
+        data.status in ['pending', 'reviewed'] &&
+        isValidOptionalString(data, 'adminNote', 1000) &&
+        isValidOptionalString(data, 'createdAt', 40);
+    }
+
+    match /coachReports/{reportId} {
+      allow get: if isValidId(reportId) && (isAdmin() || (isSignedIn() && resource.data.coachAuthUid == request.auth.uid));
+      allow list: if isSuperAdmin() || (isSignedIn() && resource.data.coachAuthUid == request.auth.uid);
+      allow create: if isValidId(reportId) && isSignedIn() && isValidCoachReport(incoming()) && hasValidCreateTimes(incoming()) &&
+        incoming().coachAuthUid == request.auth.uid &&
+        incoming().status == 'pending';
+      allow update: if isValidId(reportId) && isAdmin() && isValidCoachReport(incoming()) && hasValidUpdateTimes(incoming());
+      allow delete: if isValidId(reportId) && isAdmin();
+    }
+
+    function isValidRegistrationRequest(data) {
+      return data.keys().hasAll(['id', 'fullName', 'birthDate', 'categoryId', 'parentName', 'parentPhone', 'status', 'submittedAt', 'serverCreatedAt', 'serverUpdatedAt']) &&
+        data.keys().hasOnly([
+          'id', 'fullName', 'birthDate', 'categoryId', 'parentName', 'parentPhone',
+          'address', 'photoUrl', 'signedFormUrl', 'signedFormName', 'signedFormMime',
+          'medicalNotes', 'additionalNotes', 'applicantUserId', 'applicantAuthUid',
+          'applicantUsername', 'status', 'adminNotes', 'missingDocumentNote',
+          'rejectionReason', 'additionalDocuments', 'createdPlayerId', 'submittedAt',
+          'approvedAt', 'reviewedAt', 'reviewedBy', 'reviewedByName',
+          'notificationSentToParent', 'serverCreatedAt', 'serverUpdatedAt'
+        ]) &&
+        isValidId(data.id) &&
+        isValidString(data.fullName, 1, 120) &&
+        isValidString(data.birthDate, 4, 20) &&
+        isValidString(data.categoryId, 1, 64) &&
+        isValidString(data.parentName, 1, 120) &&
+        isValidString(data.parentPhone, 1, 32) &&
+        isValidOptionalString(data, 'address', 240) &&
+        isValidOptionalString(data, 'photoUrl', 1000) &&
+        isValidOptionalString(data, 'signedFormUrl', 1000) &&
+        isValidOptionalString(data, 'signedFormName', 200) &&
+        isValidOptionalString(data, 'signedFormMime', 100) &&
+        isValidOptionalString(data, 'medicalNotes', 1000) &&
+        isValidOptionalString(data, 'additionalNotes', 1000) &&
+        isValidOptionalString(data, 'applicantUserId', 128) &&
+        isValidOptionalString(data, 'applicantAuthUid', 128) &&
+        isValidOptionalString(data, 'applicantUsername', 64) &&
+        data.status in ['pending', 'incomplete', 'approved', 'rejected'] &&
+        isValidOptionalString(data, 'adminNotes', 1000) &&
+        isValidOptionalString(data, 'missingDocumentNote', 1000) &&
+        isValidOptionalString(data, 'rejectionReason', 1000) &&
+        isValidOptionalString(data, 'createdPlayerId', 128) &&
+        isValidString(data.submittedAt, 4, 40) &&
+        isValidOptionalString(data, 'approvedAt', 40) &&
+        isValidOptionalString(data, 'reviewedAt', 40) &&
+        isValidOptionalString(data, 'reviewedBy', 128) &&
+        isValidOptionalString(data, 'reviewedByName', 120) &&
+        (!('notificationSentToParent' in data) || data.notificationSentToParent is bool) &&
+        (!('additionalDocuments' in data) || (data.additionalDocuments is list && data.additionalDocuments.size() <= 20));
+    }
+
+    match /registrationRequests/{requestId} {
+      allow get: if isValidId(requestId) && (isAdmin() || (isSignedIn() && resource.data.applicantAuthUid == request.auth.uid));
+      allow list: if isSuperAdmin() || (isSignedIn() && resource.data.applicantAuthUid == request.auth.uid);
+      allow create: if isValidId(requestId) && isSignedIn() && isValidRegistrationRequest(incoming()) && hasValidCreateTimes(incoming()) && (
+        isAdmin() || (incoming().applicantAuthUid == request.auth.uid && incoming().status == 'pending')
+      );
+      allow update: if isValidId(requestId) && isValidRegistrationRequest(incoming()) && hasValidUpdateTimes(incoming()) && (
+        isAdmin() || (
+          isSignedIn() &&
+          existing().applicantAuthUid == request.auth.uid &&
+          existing().status == 'incomplete' &&
+          incoming().status == 'pending' &&
+          incoming().diff(existing()).affectedKeys().hasOnly(['additionalDocuments', 'status', 'serverUpdatedAt'])
+        )
+      );
+      allow delete: if isValidId(requestId) && isAdmin();
+    }
+
+    function isValidActivityLog(data) {
+      return data.keys().hasAll(['id', 'actorId', 'actorName', 'actorRole', 'action', 'entityType', 'entityId', 'serverCreatedAt', 'serverUpdatedAt']) &&
+        data.keys().hasOnly([
+          'id', 'actorId', 'actorName', 'actorRole', 'action', 'entityType',
+          'entityId', 'details', 'createdAt', 'serverCreatedAt', 'serverUpdatedAt'
+        ]) &&
+        isValidId(data.id) &&
+        isValidString(data.actorId, 1, 128) &&
+        isValidString(data.actorName, 1, 120) &&
+        data.actorRole in ['admin', 'coach', 'parent'] &&
+        isValidString(data.action, 1, 160) &&
+        isValidString(data.entityType, 1, 64) &&
+        isValidString(data.entityId, 1, 128) &&
+        isValidOptionalString(data, 'details', 1000) &&
+        isValidOptionalString(data, 'createdAt', 40);
+    }
+
+    match /activityLogs/{logId} {
+      allow get: if isValidId(logId) && isAdmin();
+      allow list: if isSuperAdmin();
+      allow create: if isValidId(logId) && isAdmin() && isValidActivityLog(incoming()) && hasValidCreateTimes(incoming());
+      allow update: if false;
+      allow delete: if false;
+    }
+
+    function isValidMigrationMarker(data) {
+      return data.keys().hasAll(['id', 'completedAt', 'sourceChecksum', 'serverCreatedAt', 'serverUpdatedAt']) &&
+        data.keys().hasOnly(['id', 'completedAt', 'importedCounts', 'sourceChecksum', 'serverCreatedAt', 'serverUpdatedAt']) &&
+        isValidId(data.id) &&
+        isValidString(data.completedAt, 4, 40) &&
+        isValidString(data.sourceChecksum, 1, 128) &&
+        (!('importedCounts' in data) || data.importedCounts is map);
+    }
+
+    match /migrations/{migrationId} {
+      allow get: if isValidId(migrationId) && isAdmin();
+      allow list: if isSuperAdmin();
+      allow create: if isValidId(migrationId) && isSuperAdmin() && isValidMigrationMarker(incoming()) && hasValidCreateTimes(incoming());
+      allow update: if false;
+      allow delete: if false;
+    }
+
+    // =========================================================
+    // 10. W.A.B TALENTS MODULE
+    // =========================================================
+    // Trusted Coach or Admin lookup (only use in get/create/update/delete, never inside allow list)
+    function isCoachOrAdmin() {
+      return isAdmin() || (
+        isSignedIn() &&
+        exists(/databases/$(database)/documents/users/$(request.auth.uid)) &&
+        get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role in ['admin', 'coach'] &&
+        get(/databases/$(database)/documents/users/$(request.auth.uid)).data.active == true
+      );
+    }
+
+    function isValidTalentVideo(data) {
+      return data.keys().hasAll([
+          'id', 'playerDisplayName', 'uploaderAuthUid', 'uploaderRole', 'isMinor',
+          'parentVerifiedConsent', 'parentConsentSignerName', 'parentConsentAt',
+          'title', 'videoUrl', 'durationSeconds', 'fileSizeBytes', 'mimeType',
+          'position', 'ageCategory', 'city', 'province', 'competitionCategory',
+          'submissionTier', 'paymentStatus', 'moderationStatus', 'isFeatured',
+          'likesCount', 'viewsCount', 'sharesCount', 'reportsCount',
+          'createdAt', 'serverCreatedAt', 'serverUpdatedAt'
+        ]) &&
+        data.keys().hasOnly([
+          'id', 'playerDisplayName', 'linkedPlayerId', 'uploaderAuthUid', 'uploaderRole',
+          'isMinor', 'parentVerifiedConsent', 'parentConsentSignerName', 'parentConsentAt',
+          'title', 'description', 'videoUrl', 'thumbnailUrl', 'durationSeconds',
+          'fileSizeBytes', 'mimeType', 'position', 'ageCategory', 'city', 'province',
+          'competitionCategory', 'submissionTier', 'paymentStatus', 'paymentReference',
+          'moderationStatus', 'moderationNote', 'moderatedByUid', 'moderatedAt',
+          'isFeatured', 'featuredWeekLabel', 'likesCount', 'viewsCount', 'sharesCount',
+          'reportsCount', 'createdAt', 'serverCreatedAt', 'serverUpdatedAt'
+        ]) &&
+        isValidId(data.id) &&
+        isValidString(data.playerDisplayName, 1, 120) &&
+        isValidOptionalString(data, 'linkedPlayerId', 128) &&
+        isValidId(data.uploaderAuthUid) &&
+        data.uploaderRole in ['admin', 'coach', 'parent'] &&
+        data.isMinor is bool &&
+        data.parentVerifiedConsent is bool &&
+        isValidString(data.parentConsentSignerName, 1, 120) &&
+        isValidString(data.parentConsentAt, 4, 40) &&
+        isValidString(data.title, 1, 160) &&
+        isValidOptionalString(data, 'description', 1000) &&
+        isValidString(data.videoUrl, 1, 1500) &&
+        isValidOptionalString(data, 'thumbnailUrl', 1500) &&
+        data.durationSeconds is number && data.durationSeconds > 0 && data.durationSeconds <= 60 &&
+        data.fileSizeBytes is number && data.fileSizeBytes > 0 && data.fileSizeBytes <= 104857600 &&
+        isValidString(data.mimeType, 1, 80) &&
+        data.position in ['goalkeeper', 'defender', 'midfielder', 'forward', 'winger'] &&
+        isValidString(data.ageCategory, 1, 32) &&
+        isValidString(data.city, 1, 100) &&
+        isValidString(data.province, 1, 100) &&
+        data.competitionCategory in ['showcase', 'best_dribbler', 'best_goal', 'best_free_kick', 'best_goalkeeper', 'best_skills'] &&
+        data.submissionTier in ['free_first', 'paid_extra'] &&
+        data.paymentStatus in ['free', 'pending_payment', 'confirmed', 'waived'] &&
+        isValidOptionalString(data, 'paymentReference', 120) &&
+        data.moderationStatus in ['pending', 'approved', 'rejected', 'removed'] &&
+        isValidOptionalString(data, 'moderationNote', 500) &&
+        isValidOptionalString(data, 'moderatedByUid', 128) &&
+        isValidOptionalString(data, 'moderatedAt', 40) &&
+        data.isFeatured is bool &&
+        isValidOptionalString(data, 'featuredWeekLabel', 64) &&
+        data.likesCount is number && data.likesCount >= 0 &&
+        data.viewsCount is number && data.viewsCount >= 0 &&
+        data.sharesCount is number && data.sharesCount >= 0 &&
+        data.reportsCount is number && data.reportsCount >= 0 &&
+        isValidString(data.createdAt, 4, 40);
+    }
+
+    match /talentVideos/{videoId} {
+      allow get: if isValidId(videoId) && (
+        isAdmin() ||
+        (resource.data.moderationStatus == 'approved' && resource.data.parentVerifiedConsent == true) ||
+        (isSignedIn() && resource.data.uploaderAuthUid == request.auth.uid)
+      );
+      allow list: if isSuperAdmin() ||
+        (resource.data.moderationStatus == 'approved' && resource.data.parentVerifiedConsent == true) ||
+        (isSignedIn() && resource.data.uploaderAuthUid == request.auth.uid);
+      allow create: if isValidId(videoId) && isSignedIn() && isValidTalentVideo(incoming()) && hasValidCreateTimes(incoming()) && (
+        isAdmin() || (
+          incoming().uploaderAuthUid == request.auth.uid &&
+          incoming().parentVerifiedConsent == true &&
+          incoming().moderationStatus == 'pending' &&
+          incoming().isFeatured == false &&
+          incoming().likesCount == 0 &&
+          incoming().viewsCount == 0 &&
+          incoming().sharesCount == 0 &&
+          incoming().reportsCount == 0
+        )
+      );
+      allow update: if isValidId(videoId) && isSignedIn() && isValidTalentVideo(incoming()) && hasValidUpdateTimes(incoming()) && (
+        isAdmin() || (
+          existing().moderationStatus == 'approved' &&
+          existing().parentVerifiedConsent == true &&
+          (
+            (incoming().diff(existing()).affectedKeys().hasOnly(['likesCount', 'serverUpdatedAt']) &&
+              (incoming().likesCount == existing().likesCount + 1 || incoming().likesCount == existing().likesCount - 1)) ||
+            (incoming().diff(existing()).affectedKeys().hasOnly(['viewsCount', 'serverUpdatedAt']) &&
+              incoming().viewsCount == existing().viewsCount + 1) ||
+            (incoming().diff(existing()).affectedKeys().hasOnly(['sharesCount', 'serverUpdatedAt']) &&
+              incoming().sharesCount == existing().sharesCount + 1) ||
+            (incoming().diff(existing()).affectedKeys().hasOnly(['reportsCount', 'serverUpdatedAt']) &&
+              incoming().reportsCount == existing().reportsCount + 1)
+          )
+        ) || (
+          existing().uploaderAuthUid == request.auth.uid &&
+          incoming().uploaderAuthUid == existing().uploaderAuthUid &&
+          incoming().diff(existing()).affectedKeys().hasOnly(['title', 'description', 'paymentReference', 'serverUpdatedAt'])
+        )
+      );
+      allow delete: if isValidId(videoId) && isAdmin();
+    }
+
+    function isValidTalentLike(data) {
+      return data.keys().hasAll(['id', 'videoId', 'userUid', 'serverCreatedAt', 'serverUpdatedAt']) &&
+        data.keys().hasOnly(['id', 'videoId', 'userUid', 'createdAt', 'serverCreatedAt', 'serverUpdatedAt']) &&
+        isValidId(data.id) &&
+        isValidId(data.videoId) &&
+        isValidId(data.userUid) &&
+        isValidOptionalString(data, 'createdAt', 40);
+    }
+
+    match /talentLikes/{likeId} {
+      allow get: if isValidId(likeId) && isSignedIn();
+      allow list: if isSuperAdmin() || (isSignedIn() && resource.data.userUid == request.auth.uid);
+      allow create: if isValidId(likeId) && isSignedIn() && isValidTalentLike(incoming()) && hasValidCreateTimes(incoming()) &&
+        incoming().userUid == request.auth.uid &&
+        likeId == (incoming().videoId + '_' + request.auth.uid);
+      allow update: if false;
+      allow delete: if isValidId(likeId) && isSignedIn() && (isAdmin() || existing().userUid == request.auth.uid);
+    }
+
+    function isValidTalentWatchlistItem(data) {
+      return data.keys().hasAll([
+          'id', 'scoutUid', 'scoutName', 'scoutRole', 'videoId',
+          'playerDisplayName', 'ageCategory', 'position', 'city', 'province',
+          'createdAt', 'serverCreatedAt', 'serverUpdatedAt'
+        ]) &&
+        data.keys().hasOnly([
+          'id', 'scoutUid', 'scoutName', 'scoutRole', 'videoId',
+          'playerDisplayName', 'ageCategory', 'position', 'city', 'province',
+          'notes', 'trialInviteSent', 'createdAt', 'serverCreatedAt', 'serverUpdatedAt'
+        ]) &&
+        isValidId(data.id) &&
+        isValidId(data.scoutUid) &&
+        isValidString(data.scoutName, 1, 120) &&
+        data.scoutRole in ['admin', 'coach'] &&
+        isValidId(data.videoId) &&
+        isValidString(data.playerDisplayName, 1, 120) &&
+        isValidString(data.ageCategory, 1, 32) &&
+        data.position in ['goalkeeper', 'defender', 'midfielder', 'forward', 'winger'] &&
+        isValidString(data.city, 1, 100) &&
+        isValidString(data.province, 1, 100) &&
+        isValidOptionalString(data, 'notes', 500) &&
+        (!('trialInviteSent' in data) || data.trialInviteSent is bool) &&
+        isValidString(data.createdAt, 4, 40);
+    }
+
+    match /talentWatchlist/{itemId} {
+      allow get: if isValidId(itemId) && isCoachOrAdmin() && (isAdmin() || resource.data.scoutUid == request.auth.uid);
+      allow list: if isSuperAdmin() || (isSignedIn() && resource.data.scoutUid == request.auth.uid);
+      allow create: if isValidId(itemId) && isCoachOrAdmin() && isValidTalentWatchlistItem(incoming()) && hasValidCreateTimes(incoming()) &&
+        incoming().scoutUid == request.auth.uid;
+      allow update: if isValidId(itemId) && isCoachOrAdmin() && isValidTalentWatchlistItem(incoming()) && hasValidUpdateTimes(incoming()) &&
+        (isAdmin() || existing().scoutUid == request.auth.uid) &&
+        incoming().scoutUid == existing().scoutUid;
+      allow delete: if isValidId(itemId) && isCoachOrAdmin() && (isAdmin() || existing().scoutUid == request.auth.uid);
+    }
+
+    function isValidTalentTrialInvite(data) {
+      return data.keys().hasAll([
+          'id', 'videoId', 'playerDisplayName', 'targetParentAuthUid',
+          'invitedByUid', 'invitedByName', 'invitedByRole', 'categoryId',
+          'trialDate', 'trialTime', 'trialVenue', 'officialMessage', 'status',
+          'createdAt', 'serverCreatedAt', 'serverUpdatedAt'
+        ]) &&
+        data.keys().hasOnly([
+          'id', 'videoId', 'playerDisplayName', 'targetParentAuthUid',
+          'invitedByUid', 'invitedByName', 'invitedByRole', 'categoryId',
+          'trialDate', 'trialTime', 'trialVenue', 'officialMessage', 'status',
+          'parentResponseNote', 'createdAt', 'serverCreatedAt', 'serverUpdatedAt'
+        ]) &&
+        isValidId(data.id) &&
+        isValidId(data.videoId) &&
+        isValidString(data.playerDisplayName, 1, 120) &&
+        isValidId(data.targetParentAuthUid) &&
+        isValidId(data.invitedByUid) &&
+        isValidString(data.invitedByName, 1, 120) &&
+        data.invitedByRole in ['admin', 'coach'] &&
+        isValidString(data.categoryId, 1, 32) &&
+        isValidString(data.trialDate, 4, 20) &&
+        isValidString(data.trialTime, 1, 16) &&
+        isValidString(data.trialVenue, 1, 160) &&
+        isValidString(data.officialMessage, 1, 1000) &&
+        data.status in ['pending', 'accepted', 'declined', 'completed'] &&
+        isValidOptionalString(data, 'parentResponseNote', 500) &&
+        isValidString(data.createdAt, 4, 40);
+    }
+
+    match /talentTrialInvites/{inviteId} {
+      allow get: if isValidId(inviteId) && (
+        isAdmin() ||
+        (isSignedIn() && (
+          resource.data.invitedByUid == request.auth.uid ||
+          resource.data.targetParentAuthUid == request.auth.uid
+        ))
+      );
+      allow list: if isSuperAdmin() || (isSignedIn() && (
+        resource.data.invitedByUid == request.auth.uid ||
+        resource.data.targetParentAuthUid == request.auth.uid
+      ));
+      allow create: if isValidId(inviteId) && isCoachOrAdmin() && isValidTalentTrialInvite(incoming()) && hasValidCreateTimes(incoming()) &&
+        incoming().invitedByUid == request.auth.uid &&
+        incoming().status == 'pending';
+      allow update: if isValidId(inviteId) && isValidTalentTrialInvite(incoming()) && hasValidUpdateTimes(incoming()) && (
+        isAdmin() ||
+        (
+          isCoachOrAdmin() &&
+          existing().invitedByUid == request.auth.uid &&
+          incoming().invitedByUid == existing().invitedByUid &&
+          incoming().targetParentAuthUid == existing().targetParentAuthUid
+        ) ||
+        (
+          isSignedIn() &&
+          existing().targetParentAuthUid == request.auth.uid &&
+          incoming().invitedByUid == existing().invitedByUid &&
+          incoming().targetParentAuthUid == existing().targetParentAuthUid &&
+          incoming().status in ['accepted', 'declined'] &&
+          incoming().diff(existing()).affectedKeys().hasOnly(['status', 'parentResponseNote', 'serverUpdatedAt'])
+        )
+      );
+      allow delete: if isValidId(inviteId) && isAdmin();
+    }
+
+    function isValidTalentCompetition(data) {
+      return data.keys().hasAll([
+          'id', 'weekLabel', 'categoryKey', 'titleAr', 'titleFr',
+          'startDate', 'endDate', 'status', 'isPublic',
+          'serverCreatedAt', 'serverUpdatedAt'
+        ]) &&
+        data.keys().hasOnly([
+          'id', 'weekLabel', 'categoryKey', 'titleAr', 'titleFr',
+          'descriptionAr', 'descriptionFr', 'startDate', 'endDate',
+          'status', 'winnerVideoId', 'winnerPlayerName', 'isPublic',
+          'createdAt', 'serverCreatedAt', 'serverUpdatedAt'
+        ]) &&
+        isValidId(data.id) &&
+        isValidString(data.weekLabel, 1, 64) &&
+        data.categoryKey in ['best_dribbler', 'best_goal', 'best_free_kick', 'best_goalkeeper', 'best_skills'] &&
+        isValidString(data.titleAr, 1, 120) &&
+        isValidString(data.titleFr, 1, 120) &&
+        isValidOptionalString(data, 'descriptionAr', 500) &&
+        isValidOptionalString(data, 'descriptionFr', 500) &&
+        isValidString(data.startDate, 4, 20) &&
+        isValidString(data.endDate, 4, 20) &&
+        data.status in ['active', 'closed'] &&
+        isValidOptionalString(data, 'winnerVideoId', 128) &&
+        isValidOptionalString(data, 'winnerPlayerName', 120) &&
+        data.isPublic == true &&
+        isValidOptionalString(data, 'createdAt', 40);
+    }
+
+    match /talentCompetitions/{competitionId} {
+      allow get: if isValidId(competitionId);
+      allow list: if isSuperAdmin() || resource.data.isPublic == true;
+      allow create: if isValidId(competitionId) && isAdmin() && isValidTalentCompetition(incoming()) && hasValidCreateTimes(incoming());
+      allow update: if isValidId(competitionId) && isAdmin() && isValidTalentCompetition(incoming()) && hasValidUpdateTimes(incoming());
+      allow delete: if isValidId(competitionId) && isAdmin();
+    }
+
+    function isValidTalentReport(data) {
+      return data.keys().hasAll([
+          'id', 'videoId', 'videoTitle', 'reporterUid', 'reason',
+          'status', 'createdAt', 'serverCreatedAt', 'serverUpdatedAt'
+        ]) &&
+        data.keys().hasOnly([
+          'id', 'videoId', 'videoTitle', 'reporterUid', 'reason', 'details',
+          'status', 'adminActionNote', 'createdAt', 'serverCreatedAt', 'serverUpdatedAt'
+        ]) &&
+        isValidId(data.id) &&
+        isValidId(data.videoId) &&
+        isValidString(data.videoTitle, 1, 160) &&
+        isValidId(data.reporterUid) &&
+        data.reason in ['inappropriate', 'minor_safety', 'non_football', 'spam', 'other'] &&
+        isValidOptionalString(data, 'details', 1000) &&
+        data.status in ['pending', 'reviewed', 'resolved', 'dismissed'] &&
+        isValidOptionalString(data, 'adminActionNote', 500) &&
+        isValidString(data.createdAt, 4, 40);
+    }
+
+    match /talentReports/{reportId} {
+      allow get: if isValidId(reportId) && (isAdmin() || (isSignedIn() && resource.data.reporterUid == request.auth.uid));
+      allow list: if isSuperAdmin() || (isSignedIn() && resource.data.reporterUid == request.auth.uid);
+      allow create: if isValidId(reportId) && isSignedIn() && isValidTalentReport(incoming()) && hasValidCreateTimes(incoming()) &&
+        incoming().reporterUid == request.auth.uid &&
+        incoming().status == 'pending';
+      allow update: if isValidId(reportId) && isAdmin() && isValidTalentReport(incoming()) && hasValidUpdateTimes(incoming());
+      allow delete: if isValidId(reportId) && isAdmin();
+    }
+
+    function isValidTalentSettings(data) {
+      return data.keys().hasAll([
+          'id', 'firstSubmissionFree', 'extraSubmissionEnabled', 'extraSubmissionFeeDzd',
+          'maxDurationSeconds', 'maxFileSizeMb', 'requireModerationBeforePublic',
+          'requireParentalConsent', 'isPublic', 'serverCreatedAt', 'serverUpdatedAt'
+        ]) &&
+        data.keys().hasOnly([
+          'id', 'firstSubmissionFree', 'extraSubmissionEnabled', 'extraSubmissionFeeDzd',
+          'paymentInstructionsAr', 'paymentInstructionsFr',
+          'maxDurationSeconds', 'maxFileSizeMb', 'requireModerationBeforePublic',
+          'requireParentalConsent', 'isPublic', 'serverCreatedAt', 'serverUpdatedAt'
+        ]) &&
+        isValidId(data.id) &&
+        data.firstSubmissionFree is bool &&
+        data.extraSubmissionEnabled is bool &&
+        data.extraSubmissionFeeDzd is number && data.extraSubmissionFeeDzd >= 0 &&
+        isValidOptionalString(data, 'paymentInstructionsAr', 500) &&
+        isValidOptionalString(data, 'paymentInstructionsFr', 500) &&
+        data.maxDurationSeconds is number && data.maxDurationSeconds > 0 && data.maxDurationSeconds <= 60 &&
+        data.maxFileSizeMb is number && data.maxFileSizeMb > 0 && data.maxFileSizeMb <= 100 &&
+        data.requireModerationBeforePublic is bool &&
+        data.requireParentalConsent is bool &&
+        data.isPublic == true;
+    }
+
+    match /talentSettings/{settingId} {
+      allow get: if isValidId(settingId);
+      allow list: if isSuperAdmin() || resource.data.isPublic == true;
+      allow create: if isValidId(settingId) && isAdmin() && isValidTalentSettings(incoming()) && hasValidCreateTimes(incoming());
+      allow update: if isValidId(settingId) && isAdmin() && isValidTalentSettings(incoming()) && hasValidUpdateTimes(incoming());
+      allow delete: if false;
+    }
+  }
+}

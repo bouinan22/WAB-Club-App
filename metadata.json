@@ -1,0 +1,8 @@
+{
+  "name": "Remix Remix W.A.B – وداد أمل بوعنان",
+  "description": "منصة احترافية متكاملة لإدارة نادي وداد أمل بوعنان لكرة القدم (W.A.B) تشمل الإدارة والمدربين والأولياء.",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}

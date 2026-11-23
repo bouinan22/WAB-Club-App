@@ -1,0 +1,106 @@
+{
+  "users": [],
+  "players": [],
+  "registrationRequests": [],
+  "coaches": [],
+  "categories": [
+    {
+      "id": "U7",
+      "code": "U7",
+      "name": "فئة أقل من 7 سنوات (براعم)",
+      "ageRange": "5 – 7 سنوات",
+      "annualFee": 12000,
+      "description": "التأسيس الحركي والتآلف مع الكرة عبر ألعاب تعليمية وتربوية."
+    },
+    {
+      "id": "U9",
+      "code": "U9",
+      "name": "فئة أقل من 9 سنوات",
+      "ageRange": "8 – 9 سنوات",
+      "annualFee": 14000,
+      "description": "المهارات الفردية الأساسية، التمرير القصير، واللعب الجماعي الأولي."
+    },
+    {
+      "id": "U11",
+      "code": "U11",
+      "name": "فئة أقل من 11 سنة",
+      "ageRange": "10 – 11 سنة",
+      "annualFee": 15000,
+      "description": "تطوير التحكم بالكرة، التمركز، وبداية الفهم التكتيكي 8 ضد 8."
+    },
+    {
+      "id": "U13",
+      "code": "U13",
+      "name": "فئة أقل من 13 سنة",
+      "ageRange": "12 – 13 سنة",
+      "annualFee": 16000,
+      "description": "الانتقال إلى اللعب الكامل، الانسجام التكتيكي، واللياقة المتوازنة."
+    },
+    {
+      "id": "U15",
+      "code": "U15",
+      "name": "فئة أقل من 15 سنة (أصاغر)",
+      "ageRange": "14 – 15 سنة",
+      "annualFee": 18000,
+      "description": "التكتيك الجماعي، القوة البدنية الموجهة، والمنافسات الرسمية."
+    },
+    {
+      "id": "U17",
+      "code": "U17",
+      "name": "فئة أقل من 17 سنة (أشبال)",
+      "ageRange": "16 – 17 سنة",
+      "annualFee": 20000,
+      "description": "التحضير التنافسي العالي والانضباط التكتيكي قبل الفريق الأول."
+    }
+  ],
+  "seasons": [
+    {
+      "id": "season_2026_2027",
+      "name": "2026-2027",
+      "startDate": "2026-09-01",
+      "endDate": "2027-06-30",
+      "subscriptionStartDate": "2026-09-01",
+      "subscriptionEndDate": "2027-06-30",
+      "defaultAnnualFee": 16000,
+      "allowInstallments": true,
+      "status": "active",
+      "createdAt": "2026-11-18T14:27:04.836Z"
+    }
+  ],
+  "subscriptions": [],
+  "attendance": [],
+  "trainingSessions": [],
+  "matches": [],
+  "payments": [],
+  "financeEntries": [],
+  "announcements": [],
+  "notifications": [],
+  "evaluations": [],
+  "coachReports": [],
+  "activityLogs": [],
+  "clubSettings": {
+    "clubName": "وداد أمل بوعنان",
+    "clubShortName": "W.A.B",
+    "clubEnglishName": "WIDAD AMEL BOUINAN",
+    "foundedYear": "2021",
+    "logoUrl": "/assets/aistudio/FB_IMG_1792160849908_80558759.jpg",
+    "primaryColor": "#14532D",
+    "secondaryColor": "#16A34A",
+    "surfaceColor": "#F3F4F6",
+    "phone": "",
+    "email": "",
+    "address": "بوعنان، الجزائر",
+    "season": "2026-2027",
+    "seasonStartDate": "2026-09-01",
+    "seasonEndDate": "2027-06-30",
+    "subscriptionStartDate": "2026-09-01",
+    "subscriptionEndDate": "2027-06-30",
+    "defaultAnnualFee": 16000,
+    "allowInstallments": true,
+    "venues": [
+      "الملعب البلدي بوعنان — الرئيسي",
+      "ملعب التدريب الملحق بوعنان"
+    ],
+    "currency": "دج"
+  }
+}
